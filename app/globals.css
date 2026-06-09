@@ -1,0 +1,269 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-plus-jakarta);
+  --font-sans: var(--font-plus-jakarta), 'Plus Jakarta Sans Fallback', system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), 'Geist Mono Fallback', monospace;
+
+  /* color aliases */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.4);
+}
+
+:root {
+  /* Core palette — light airy premium */
+  --background: oklch(0.968 0.007 248);
+  --foreground: oklch(0.16 0.016 258);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0.016 258);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.016 258);
+
+  /* Brand: crisp electric indigo-blue */
+  --primary: oklch(0.56 0.24 262);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.95 0.012 248);
+  --secondary-foreground: oklch(0.32 0.02 258);
+
+  --muted: oklch(0.945 0.01 248);
+  --muted-foreground: oklch(0.50 0.022 258);
+
+  --accent: oklch(0.935 0.045 262);
+  --accent-foreground: oklch(0.44 0.18 262);
+
+  --destructive: oklch(0.57 0.245 27);
+
+  --border: oklch(0.905 0.014 248);
+  --input: oklch(0.93 0.012 248);
+  --ring: oklch(0.56 0.24 262);
+
+  --radius: 0.875rem;
+
+  /* Charts */
+  --chart-1: oklch(0.56 0.24 262);
+  --chart-2: oklch(0.66 0.18 200);
+  --chart-3: oklch(0.70 0.18 162);
+  --chart-4: oklch(0.78 0.17 85);
+  --chart-5: oklch(0.64 0.22 28);
+
+  /* Sidebar */
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.22 0.018 258);
+  --sidebar-primary: oklch(0.56 0.24 262);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.935 0.045 262);
+  --sidebar-accent-foreground: oklch(0.44 0.18 262);
+  --sidebar-border: oklch(0.915 0.01 248);
+  --sidebar-ring: oklch(0.56 0.24 262);
+
+  /* Custom brand palette */
+  --brand-soft: oklch(0.935 0.045 262);
+  --coral: oklch(0.65 0.19 28);
+  --coral-soft: oklch(0.95 0.05 28);
+  --emerald: oklch(0.64 0.18 162);
+  --emerald-soft: oklch(0.945 0.055 162);
+  --amber: oklch(0.76 0.16 85);
+  --amber-soft: oklch(0.97 0.055 85);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  html {
+    @apply bg-background font-sans;
+  }
+}
+
+/* =============================================
+   PREMIUM ANIMATIONS
+   ============================================= */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes number-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+@keyframes cart-bounce {
+  0%, 100% { transform: scale(1); }
+  30% { transform: scale(1.28); }
+  60% { transform: scale(0.92); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15%       { transform: translateX(-8px); }
+  30%       { transform: translateX(8px); }
+  45%       { transform: translateX(-6px); }
+  60%       { transform: translateX(6px); }
+  75%       { transform: translateX(-3px); }
+  90%       { transform: translateX(3px); }
+}
+
+.animate-fade-up   { animation: fade-up 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+.animate-fade-in   { animation: fade-in 0.3s ease both; }
+.animate-scale-in  { animation: scale-in 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+.animate-slide-right { animation: slide-right 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+.animate-number-pop { animation: number-pop 0.35s ease; }
+.animate-cart-bounce { animation: cart-bounce 0.4s ease; }
+.animate-shake       { animation: shake 0.55s cubic-bezier(0.36,0.07,0.19,0.97) both; }
+
+/* Stagger helpers */
+.stagger-1 { animation-delay: 0.04s; }
+.stagger-2 { animation-delay: 0.08s; }
+.stagger-3 { animation-delay: 0.13s; }
+.stagger-4 { animation-delay: 0.18s; }
+
+/* =============================================
+   3D CARD — premium lift
+   ============================================= */
+.card-3d {
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: transform 0.28s cubic-bezier(0.16,1,0.3,1),
+              box-shadow 0.28s cubic-bezier(0.16,1,0.3,1);
+}
+.card-3d:hover {
+  transform: translateY(-6px) rotateX(2.5deg) scale(1.01);
+  box-shadow:
+    0 24px 48px -10px oklch(0.56 0.24 262 / 0.16),
+    0 10px 20px -6px oklch(0 0 0 / 0.07),
+    inset 0 1px 0 oklch(1 0 0 / 0.9);
+}
+
+/* =============================================
+   PRODUCT CARD — POS
+   ============================================= */
+.product-card {
+  transition: transform 0.22s cubic-bezier(0.16,1,0.3,1),
+              box-shadow 0.22s cubic-bezier(0.16,1,0.3,1),
+              border-color 0.22s ease;
+  will-change: transform;
+}
+.product-card:not(:disabled):hover {
+  transform: translateY(-5px) scale(1.02);
+  box-shadow:
+    0 16px 32px -8px oklch(0.56 0.24 262 / 0.18),
+    0 6px 12px -4px oklch(0 0 0 / 0.06);
+  border-color: oklch(0.56 0.24 262 / 0.4);
+}
+.product-card:not(:disabled):active {
+  transform: scale(0.96);
+  transition-duration: 0.1s;
+}
+
+/* =============================================
+   GLASSMORPHISM
+   ============================================= */
+.glass {
+  backdrop-filter: blur(16px) saturate(160%);
+  background: oklch(1 0 0 / 0.78);
+  border: 1px solid oklch(1 0 0 / 0.45);
+}
+
+/* =============================================
+   TABLE ROWS
+   ============================================= */
+.table-row-hover {
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.table-row-hover:hover {
+  background-color: oklch(0.96 0.02 262 / 0.45);
+}
+
+/* =============================================
+   SHIMMER LOADING
+   ============================================= */
+.shimmer {
+  background: linear-gradient(90deg,
+    oklch(0.94 0.01 248) 0%,
+    oklch(0.97 0.005 248) 50%,
+    oklch(0.94 0.01 248) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* =============================================
+   CUSTOM SCROLLBAR
+   ============================================= */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  {
+  background: oklch(0.84 0.02 248);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: oklch(0.72 0.04 248); }
+
+/* =============================================
+   PRINT RECEIPT
+   ============================================= */
+@media print {
+  body > *:not(#receipt-print) { display: none !important; }
+  #receipt-print { display: block !important; }
+}
