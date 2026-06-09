@@ -1,12 +1,15 @@
 "use client"
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Receipt } from 'lucide-react'
+import { ChevronDown, ChevronRight, Receipt, ReceiptText, RotateCw, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/lib/store'
+import { issueFiscalReceipt, FiscalError } from '@/lib/fiscal'
+import { toast } from 'sonner'
 import type { Sale, SaleItem } from '@/lib/mock-data'
 
 const PAGE_SIZE = 25
@@ -24,10 +27,35 @@ function formatDt(iso: string) {
 }
 
 export function SalesHistory({ sales, saleItems }: Props) {
+  const { updateSaleFiscal } = useStore()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [method, setMethod] = useState('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+
+  async function retryFiscal(sale: Sale, items: SaleItem[]) {
+    setRetryingId(sale.id)
+    const t = toast.loading('ფისკალური ჩეკი იბეჭდება...')
+    try {
+      const result = await issueFiscalReceipt({
+        saleId: sale.id,
+        total: sale.total,
+        paymentMethod: sale.payment_method,
+        items: items.map(i => ({
+          name: i.product_name, quantity: i.quantity, unitPrice: i.unit_price,
+          total: i.total_price, barcode: i.barcode,
+        })),
+      })
+      await updateSaleFiscal(sale.id, { fiscal_status: 'success', fiscal_id: result.fiscalId, fiscal_data: result.raw })
+      toast.success(`ფისკალური ჩეკი გაიცა #${result.fiscalId}`, { id: t })
+    } catch (e) {
+      await updateSaleFiscal(sale.id, { fiscal_status: 'failed' })
+      toast.error(e instanceof FiscalError ? e.message : 'ფისკალური ჩეკი ვერ გაიცა', { id: t })
+    } finally {
+      setRetryingId(null)
+    }
+  }
 
   const filtered = sales.filter(s => {
     const matchMethod = method === 'all' || s.payment_method === method
@@ -96,18 +124,29 @@ export function SalesHistory({ sales, saleItems }: Props) {
                       <td className="px-4 py-3 text-center">
                         <Badge variant="secondary">{sale.items_count}</Badge>
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge className={cn(
-                          sale.payment_method === 'cash'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-blue-100 text-blue-700'
-                        )}>
-                          {sale.payment_method === 'cash' ? 'ნაღდი' : 'ბარათი'}
-                        </Badge>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col items-center gap-1">
+                          <Badge className={cn(
+                            sale.payment_method === 'cash'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-blue-100 text-blue-700'
+                          )}>
+                            {sale.payment_method === 'cash' ? 'ნაღდი' : 'ბარათი'}
+                          </Badge>
+                          {sale.is_fiscal && sale.fiscal_status !== 'success' && (
+                            <span className={cn(
+                              'flex items-center gap-1 text-[10px] font-bold',
+                              sale.fiscal_status === 'failed' ? 'text-red-600' : 'text-amber-600'
+                            )}>
+                              <ReceiptText className="size-3" />
+                              {sale.fiscal_status === 'failed' ? 'ჩეკი ვერ გაიცა' : 'ჩეკი მუშავდება'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-primary">₾{sale.total.toFixed(2)}</td>
                     </tr>
-                    {isExpanded && items.length > 0 && (
+                    {isExpanded && (
                       <tr key={`${sale.id}-expand`} className="border-b border-border/50 bg-muted/20">
                         <td colSpan={7} className="px-8 py-3">
                           <div className="flex flex-col gap-1.5">
@@ -119,6 +158,29 @@ export function SalesHistory({ sales, saleItems }: Props) {
                               </div>
                             ))}
                           </div>
+                          {sale.is_fiscal && (
+                            <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
+                              <span className="flex items-center gap-1.5 text-xs">
+                                <ReceiptText className="size-3.5 text-muted-foreground" />
+                                {sale.fiscal_status === 'success'
+                                  ? <span className="text-emerald-700 font-semibold">ფისკალური ჩეკი #{sale.fiscal_id}</span>
+                                  : sale.fiscal_status === 'pending'
+                                    ? <span className="text-amber-700 font-semibold">ჩეკი მუშავდება…</span>
+                                    : <span className="text-red-600 font-semibold">ფისკალური ჩეკი ვერ გაიცა</span>}
+                              </span>
+                              {sale.fiscal_status !== 'success' && (
+                                <Button
+                                  size="sm" variant="outline"
+                                  disabled={retryingId === sale.id}
+                                  onClick={(e) => { e.stopPropagation(); retryFiscal(sale, items) }}
+                                  className="h-8 rounded-lg gap-1.5 text-xs"
+                                >
+                                  {retryingId === sale.id ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
+                                  ჩეკის ხელახლა ცდა
+                                </Button>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}

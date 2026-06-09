@@ -8,6 +8,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean slate (so the file can be re-run without errors)
+DROP TABLE IF EXISTS fiscal_reports CASCADE;
 DROP TABLE IF EXISTS sale_items CASCADE;
 DROP TABLE IF EXISTS sales CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
@@ -51,6 +52,12 @@ CREATE TABLE sales (
   total          DECIMAL(10, 2) NOT NULL,
   payment_method TEXT CHECK (payment_method IN ('cash', 'card')) NOT NULL,
   items_count    INTEGER NOT NULL DEFAULT 0,
+  -- Fiscalization (RS.GE cash register). is_fiscal = was a receipt requested for this sale.
+  is_fiscal      BOOLEAN NOT NULL DEFAULT false,
+  fiscal_status  TEXT NOT NULL DEFAULT 'none' CHECK (fiscal_status IN ('none','pending','success','failed')),
+  fiscal_id      TEXT,            -- receipt number returned by the fiscal device
+  fiscal_data    JSONB,           -- full raw response (QR, sequence, device id, ...)
+  fiscalized_at  TIMESTAMPTZ,
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_sales_created ON sales(created_at);
@@ -87,18 +94,31 @@ INSERT INTO settings (key, value) VALUES
   ('pin',         '1234');     -- in-app quick-lock PIN (separate from the real login)
 
 -- ============================================================
+--  FISCAL REPORTS (audit log of Z / X reports from the device)
+-- ============================================================
+CREATE TABLE fiscal_reports (
+  id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  type       TEXT NOT NULL CHECK (type IN ('Z','X')),   -- Z = day close, X = mid-day read
+  report_id  TEXT,                                       -- report number from the device
+  data       JSONB,                                      -- full device response (daily totals, ...)
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 --  ROW LEVEL SECURITY
 --  Admin-only portal: any signed-in (authenticated) user has
 --  full access; anonymous visitors have none.
 -- ============================================================
-ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sales      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sale_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settings   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sales          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sale_items     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fiscal_reports ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "authenticated full access" ON categories FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON products   FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON sales      FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON sale_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON settings   FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON categories     FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON products       FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON sales          FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON sale_items     FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON settings       FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON fiscal_reports FOR ALL TO authenticated USING (true) WITH CHECK (true);

@@ -5,6 +5,7 @@ import { KpiCards } from '@/components/accounting/kpi-cards'
 import { SalesChart } from '@/components/accounting/sales-chart'
 import { SalesHistory } from '@/components/accounting/sales-history'
 import { InventoryTab } from '@/components/accounting/inventory-tab'
+import { FiscalReports } from '@/components/fiscal/fiscal-reports'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Banknote, CreditCard, BarChart2, History, Package } from 'lucide-react'
@@ -96,6 +97,7 @@ export default function AccountingPage() {
       {/* Overview tab */}
       {tab === 'overview' && (
         <div className="flex flex-col gap-5">
+          <FiscalReports />
           <KpiCards sales={filteredSales} />
           <SalesChart sales={filteredSales} />
 

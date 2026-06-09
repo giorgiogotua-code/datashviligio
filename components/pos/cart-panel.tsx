@@ -1,13 +1,14 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
-import { ShoppingCart, Trash2, Plus, Minus, X, CreditCard, Banknote, CheckCircle, Printer, Sparkles } from 'lucide-react'
+import { ShoppingCart, Trash2, Plus, Minus, X, CreditCard, Banknote, CheckCircle, Printer, Sparkles, ReceiptText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
+import { issueFiscalReceipt, FiscalError } from '@/lib/fiscal'
 import { toast } from 'sonner'
 
 export interface CartItem {
@@ -32,12 +33,14 @@ function formatDate(d: Date) {
 }
 
 export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Props) {
-  const { addSale } = useStore()
+  const { addSale, updateSaleFiscal } = useStore()
   const [method, setMethod] = useState<'cash' | 'card'>('cash')
+  const [fiscalEnabled, setFiscalEnabled] = useState(true)
+  const [isSelling, setIsSelling] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [clearOpen, setClearOpen]     = useState(false)
   const [receiptOpen, setReceiptOpen] = useState(false)
-  const [lastSale, setLastSale]       = useState<{ items: CartItem[]; total: number; method: string; date: Date } | null>(null)
+  const [lastSale, setLastSale]       = useState<{ items: CartItem[]; total: number; method: string; date: Date; fiscalId?: string | null; fiscalFailed?: boolean } | null>(null)
   const [cartBounce, setCartBounce]   = useState(false)
   const prevCount = useRef(items.length)
 
@@ -53,19 +56,52 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
     prevCount.current = items.length
   }, [items.length])
 
-  const handleSell = () => {
+  const handleSell = async () => {
+    if (isSelling) return
+    setIsSelling(true)
     const now = new Date()
-    addSale(
-      { total, payment_method: method, items_count: count },
-      items.map(i => ({
-        product_id: i.product_id, product_name: i.product_name, barcode: i.barcode,
-        quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity,
-      }))
-    )
-    setLastSale({ items: [...items], total, method: method === 'cash' ? 'ნაღდი' : 'ბარათი', date: now })
-    setConfirmOpen(false); onClear()
-    toast.success('გაყიდვა წარმატებით დასრულდა!')
-    setReceiptOpen(true)
+    const soldItems = [...items]
+    try {
+      const sale = await addSale(
+        { total, payment_method: method, items_count: count, is_fiscal: fiscalEnabled },
+        soldItems.map(i => ({
+          product_id: i.product_id, product_name: i.product_name, barcode: i.barcode,
+          quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity,
+        }))
+      )
+      if (!sale) return // store already surfaced the error
+
+      setLastSale({ items: soldItems, total, method: method === 'cash' ? 'ნაღდი' : 'ბარათი', date: now })
+      setConfirmOpen(false); onClear()
+      toast.success('გაყიდვა წარმატებით დასრულდა!')
+      setReceiptOpen(true)
+
+      // Fiscal receipt — only when the cashier asked for one.
+      if (fiscalEnabled) {
+        const fiscalToast = toast.loading('ფისკალური ჩეკი იბეჭდება...')
+        try {
+          const result = await issueFiscalReceipt({
+            saleId: sale.id,
+            total,
+            paymentMethod: method,
+            items: soldItems.map(i => ({
+              name: i.product_name, quantity: i.quantity, unitPrice: i.unit_price,
+              total: i.unit_price * i.quantity, barcode: i.barcode,
+            })),
+          })
+          await updateSaleFiscal(sale.id, { fiscal_status: 'success', fiscal_id: result.fiscalId, fiscal_data: result.raw })
+          setLastSale(prev => prev ? { ...prev, fiscalId: result.fiscalId } : prev)
+          toast.success(`ფისკალური ჩეკი გაიცა #${result.fiscalId}`, { id: fiscalToast })
+        } catch (err) {
+          await updateSaleFiscal(sale.id, { fiscal_status: 'failed' })
+          setLastSale(prev => prev ? { ...prev, fiscalFailed: true } : prev)
+          const msg = err instanceof FiscalError ? err.message : 'ფისკალური ჩეკი ვერ გაიცა'
+          toast.error(`${msg} — გაყიდვა შენახულია, ჩეკის გამეორება ისტორიიდან შეიძლება`, { id: fiscalToast, duration: 6000 })
+        }
+      }
+    } finally {
+      setIsSelling(false)
+    }
   }
 
   return (
@@ -175,13 +211,35 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
           ))}
         </div>
 
+        {/* Fiscal receipt toggle */}
+        <button
+          type="button"
+          onClick={() => setFiscalEnabled(v => !v)}
+          className={cn(
+            'flex items-center gap-3 w-full px-4 py-2.5 rounded-2xl border-2 transition-all duration-200',
+            fiscalEnabled
+              ? 'border-primary/30 bg-primary/5'
+              : 'border-border bg-muted/30'
+          )}
+        >
+          <ReceiptText className={cn('size-4 shrink-0', fiscalEnabled ? 'text-primary' : 'text-muted-foreground')} />
+          <div className="flex-1 text-left">
+            <p className={cn('text-sm font-bold leading-tight', fiscalEnabled ? 'text-foreground' : 'text-muted-foreground')}>ფისკალური ჩეკი</p>
+            <p className="text-[11px] text-muted-foreground leading-tight">{fiscalEnabled ? 'ჩეკი ამოიბეჭდება' : 'ჩეკის გარეშე'}</p>
+          </div>
+          {/* switch */}
+          <span className={cn('relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0', fiscalEnabled ? 'bg-primary' : 'bg-muted-foreground/30')}>
+            <span className={cn('absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200', fiscalEnabled ? 'translate-x-[22px]' : 'translate-x-0.5')} />
+          </span>
+        </button>
+
         {/* Sell button */}
         <button
-          disabled={items.length === 0}
+          disabled={items.length === 0 || isSelling}
           onClick={() => setConfirmOpen(true)}
           className={cn(
             'w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 transition-all duration-200',
-            items.length === 0
+            items.length === 0 || isSelling
               ? 'bg-muted text-muted-foreground cursor-not-allowed'
               : 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white shadow-xl shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:-translate-y-0.5 active:translate-y-0'
           )}
@@ -198,11 +256,15 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
             <AlertDialogTitle>გაყიდვის დადასტურება</AlertDialogTitle>
             <AlertDialogDescription>
               სულ: <strong className="text-foreground">₾{total.toFixed(2)}</strong> &bull; გადახდა: <strong className="text-foreground">{method === 'cash' ? 'ნაღდი' : 'ბარათი'}</strong>
+              <span className={cn('mt-2 flex items-center gap-1.5 text-xs font-semibold', fiscalEnabled ? 'text-primary' : 'text-muted-foreground')}>
+                <ReceiptText className="size-3.5" />
+                {fiscalEnabled ? 'ფისკალური ჩეკი ამოიბეჭდება' : 'ფისკალური ჩეკის გარეშე'}
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="rounded-xl">გაუქმება</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSell} className="rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 border-0 hover:from-emerald-600 hover:to-green-600 text-white">
+            <AlertDialogCancel className="rounded-xl" disabled={isSelling}>გაუქმება</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSell} disabled={isSelling} className="rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 border-0 hover:from-emerald-600 hover:to-green-600 text-white">
               <CheckCircle className="size-4 mr-1.5" /> დადასტურება
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -254,6 +316,17 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>გადახდა:</span><span className="font-semibold">{lastSale.method}</span>
               </div>
+              {lastSale.fiscalId && (
+                <div className="flex justify-between text-xs text-emerald-700 bg-emerald-50 rounded-lg px-2 py-1.5">
+                  <span className="flex items-center gap-1"><ReceiptText className="size-3.5" /> ფისკალური ჩეკი:</span>
+                  <span className="font-mono font-bold">#{lastSale.fiscalId}</span>
+                </div>
+              )}
+              {lastSale.fiscalFailed && (
+                <div className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">
+                  ⚠ ფისკალური ჩეკი ვერ გაიცა — გაყიდვა შენახულია, ჩეკი მოგვიანებით განმეორდება
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setReceiptOpen(false)} className="rounded-xl">დახურვა</Button>

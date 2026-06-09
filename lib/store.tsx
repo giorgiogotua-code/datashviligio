@@ -7,6 +7,7 @@ import {
   type Product,
   type Sale,
   type SaleItem,
+  type FiscalStatus,
 } from './mock-data'
 
 const supabase = createClient()
@@ -44,7 +45,14 @@ export interface StoreState {
   importProducts: (products: Omit<Product, 'id' | 'created_at'>[]) => Promise<void>
   updateProduct: (id: string, p: Partial<Product>) => Promise<void>
   deleteProduct: (id: string) => Promise<void>
-  addSale: (sale: Omit<Sale, 'id' | 'created_at'>, items: Omit<SaleItem, 'id' | 'sale_id'>[]) => Promise<void>
+  addSale: (
+    sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'>,
+    items: Omit<SaleItem, 'id' | 'sale_id'>[]
+  ) => Promise<Sale | null>
+  updateSaleFiscal: (
+    saleId: string,
+    fiscal: { fiscal_status: FiscalStatus; fiscal_id?: string | null; fiscal_data?: Record<string, unknown> | null }
+  ) => Promise<void>
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -78,6 +86,11 @@ function mapSale(r: any): Sale {
     payment_method: r.payment_method,
     items_count: num(r.items_count),
     created_at: r.created_at,
+    is_fiscal: !!r.is_fiscal,
+    fiscal_status: r.fiscal_status ?? 'none',
+    fiscal_id: r.fiscal_id ?? null,
+    fiscal_data: r.fiscal_data ?? null,
+    fiscalized_at: r.fiscalized_at ?? null,
   }
 }
 
@@ -267,13 +280,21 @@ export const useStore = create<StoreState>()(
 
       // ---- Sales ----
       addSale: async (sale, items) => {
-        // 1) the receipt
+        // 1) the receipt. If a fiscal receipt was requested, it starts as 'pending'
+        //    and is resolved later by updateSaleFiscal once the device responds.
+        const saleInsert = {
+          total: sale.total,
+          payment_method: sale.payment_method,
+          items_count: sale.items_count,
+          is_fiscal: sale.is_fiscal,
+          fiscal_status: (sale.is_fiscal ? 'pending' : 'none') as FiscalStatus,
+        }
         const { data: saleRow, error: saleErr } = await supabase
           .from('sales')
-          .insert(sale)
+          .insert(saleInsert)
           .select()
           .single()
-        if (failed(saleErr, 'გაყიდვის შენახვა ვერ მოხერხდა') || !saleRow) return
+        if (failed(saleErr, 'გაყიდვის შენახვა ვერ მოხერხდა') || !saleRow) return null
 
         // 2) the line items
         const itemRows = items.map((i) => ({ ...i, sale_id: saleRow.id }))
@@ -281,7 +302,7 @@ export const useStore = create<StoreState>()(
           .from('sale_items')
           .insert(itemRows)
           .select()
-        if (failed(itemsErr, 'გაყიდვის პოზიციების შენახვა ვერ მოხერხდა')) return
+        if (failed(itemsErr, 'გაყიდვის პოზიციების შენახვა ვერ მოხერხდა')) return null
 
         // 3) decrement stock for each sold product
         const products = get().products
@@ -295,13 +316,30 @@ export const useStore = create<StoreState>()(
         )
 
         // 4) reflect everything locally
+        const newSale = mapSale(saleRow)
         set((state) => ({
-          sales: [mapSale(saleRow), ...state.sales],
+          sales: [newSale, ...state.sales],
           saleItems: [...state.saleItems, ...(savedItems ?? []).map(mapSaleItem)],
           products: state.products.map((p) => {
             const sold = items.find((i) => i.product_id === p.id)
             return sold ? { ...p, quantity: Math.max(0, p.quantity - sold.quantity) } : p
           }),
+        }))
+        return newSale
+      },
+
+      // ---- Fiscal result of a sale (called after the device responds) ----
+      updateSaleFiscal: async (saleId, fiscal) => {
+        const patch = {
+          fiscal_status: fiscal.fiscal_status,
+          fiscal_id: fiscal.fiscal_id ?? null,
+          fiscal_data: fiscal.fiscal_data ?? null,
+          fiscalized_at: fiscal.fiscal_status === 'success' ? new Date().toISOString() : null,
+        }
+        const { error } = await supabase.from('sales').update(patch).eq('id', saleId)
+        if (failed(error, 'ფისკალური სტატუსის შენახვა ვერ მოხერხდა')) return
+        set((state) => ({
+          sales: state.sales.map((s) => (s.id === saleId ? { ...s, ...patch } : s)),
         }))
       },
     }),
