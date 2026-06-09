@@ -49,6 +49,10 @@ export interface StoreState {
     sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'>,
     items: Omit<SaleItem, 'id' | 'sale_id'>[]
   ) => Promise<Sale | null>
+  addReturn: (
+    original: Sale,
+    items: Omit<SaleItem, 'id' | 'sale_id'>[]
+  ) => Promise<Sale | null>
   updateSaleFiscal: (
     saleId: string,
     fiscal: { fiscal_status: FiscalStatus; fiscal_id?: string | null; fiscal_data?: Record<string, unknown> | null }
@@ -86,6 +90,8 @@ function mapSale(r: any): Sale {
     payment_method: r.payment_method,
     items_count: num(r.items_count),
     created_at: r.created_at,
+    type: r.type ?? 'sale',
+    reversal_of: r.reversal_of ?? null,
     is_fiscal: !!r.is_fiscal,
     fiscal_status: r.fiscal_status ?? 'none',
     fiscal_id: r.fiscal_id ?? null,
@@ -279,53 +285,60 @@ export const useStore = create<StoreState>()(
       },
 
       // ---- Sales ----
+      // Atomic: sale + line items + stock change happen in one DB transaction
+      // (Postgres function create_sale). is_fiscal sales start as 'pending'.
       addSale: async (sale, items) => {
-        // 1) the receipt. If a fiscal receipt was requested, it starts as 'pending'
-        //    and is resolved later by updateSaleFiscal once the device responds.
-        const saleInsert = {
-          total: sale.total,
-          payment_method: sale.payment_method,
-          items_count: sale.items_count,
-          is_fiscal: sale.is_fiscal,
-          fiscal_status: (sale.is_fiscal ? 'pending' : 'none') as FiscalStatus,
-        }
-        const { data: saleRow, error: saleErr } = await supabase
-          .from('sales')
-          .insert(saleInsert)
-          .select()
-          .single()
-        if (failed(saleErr, 'გაყიდვის შენახვა ვერ მოხერხდა') || !saleRow) return null
+        const { data, error } = await supabase.rpc('create_sale', {
+          p_total: sale.total,
+          p_payment_method: sale.payment_method,
+          p_items_count: sale.items_count,
+          p_is_fiscal: sale.is_fiscal,
+          p_items: items,
+          p_type: 'sale',
+        })
+        if (failed(error, 'გაყიდვის შენახვა ვერ მოხერხდა') || !data) return null
 
-        // 2) the line items
-        const itemRows = items.map((i) => ({ ...i, sale_id: saleRow.id }))
-        const { data: savedItems, error: itemsErr } = await supabase
-          .from('sale_items')
-          .insert(itemRows)
-          .select()
-        if (failed(itemsErr, 'გაყიდვის პოზიციების შენახვა ვერ მოხერხდა')) return null
-
-        // 3) decrement stock for each sold product
-        const products = get().products
-        await Promise.all(
-          items.map((i) => {
-            const prod = products.find((p) => p.id === i.product_id)
-            if (!prod) return Promise.resolve()
-            const newQty = Math.max(0, prod.quantity - i.quantity)
-            return supabase.from('products').update({ quantity: newQty }).eq('id', i.product_id)
-          })
-        )
-
-        // 4) reflect everything locally
+        const saleRow = (data as any).sale
+        const savedItems = ((data as any).items ?? []) as any[]
         const newSale = mapSale(saleRow)
         set((state) => ({
           sales: [newSale, ...state.sales],
-          saleItems: [...state.saleItems, ...(savedItems ?? []).map(mapSaleItem)],
+          saleItems: [...state.saleItems, ...savedItems.map(mapSaleItem)],
           products: state.products.map((p) => {
             const sold = items.find((i) => i.product_id === p.id)
             return sold ? { ...p, quantity: Math.max(0, p.quantity - sold.quantity) } : p
           }),
         }))
         return newSale
+      },
+
+      // Return / refund: restores stock (+qty) via the same atomic function.
+      addReturn: async (original, items) => {
+        const total = items.reduce((s, i) => s + i.total_price, 0)
+        const itemsCount = items.reduce((s, i) => s + i.quantity, 0)
+        const { data, error } = await supabase.rpc('create_sale', {
+          p_total: total,
+          p_payment_method: original.payment_method,
+          p_items_count: itemsCount,
+          p_is_fiscal: original.is_fiscal,
+          p_items: items,
+          p_type: 'return',
+          p_reversal_of: original.id,
+        })
+        if (failed(error, 'დაბრუნების შენახვა ვერ მოხერხდა') || !data) return null
+
+        const saleRow = (data as any).sale
+        const savedItems = ((data as any).items ?? []) as any[]
+        const newReturn = mapSale(saleRow)
+        set((state) => ({
+          sales: [newReturn, ...state.sales],
+          saleItems: [...state.saleItems, ...savedItems.map(mapSaleItem)],
+          products: state.products.map((p) => {
+            const ret = items.find((i) => i.product_id === p.id)
+            return ret ? { ...p, quantity: p.quantity + ret.quantity } : p
+          }),
+        }))
+        return newReturn
       },
 
       // ---- Fiscal result of a sale (called after the device responds) ----

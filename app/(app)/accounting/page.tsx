@@ -9,7 +9,7 @@ import { FiscalReports } from '@/components/fiscal/fiscal-reports'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Banknote, CreditCard, BarChart2, History, Package } from 'lucide-react'
-import type { Sale } from '@/lib/mock-data'
+import { saleAmount, type Sale } from '@/lib/mock-data'
 
 type Period = 'today' | 'week' | 'month' | 'all'
 type Tab    = 'overview' | 'history' | 'inventory'
@@ -45,8 +45,8 @@ export default function AccountingPage() {
 
   const filteredSales = useMemo(() => filterByPeriod(sales, period), [sales, period])
 
-  const cashTotal  = filteredSales.filter(s => s.payment_method === 'cash').reduce((s, x) => s + x.total, 0)
-  const cardTotal  = filteredSales.filter(s => s.payment_method === 'card').reduce((s, x) => s + x.total, 0)
+  const cashTotal  = filteredSales.filter(s => s.payment_method === 'cash').reduce((s, x) => s + saleAmount(x), 0)
+  const cardTotal  = filteredSales.filter(s => s.payment_method === 'card').reduce((s, x) => s + saleAmount(x), 0)
   const grandTotal = cashTotal + cardTotal
   const cashPct    = grandTotal > 0 ? Math.round((cashTotal / grandTotal) * 100) : 0
 

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { TrendingUp, ShoppingBag, DollarSign, Receipt, ArrowUpRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Sale } from '@/lib/mock-data'
+import { saleAmount, type Sale } from '@/lib/mock-data'
 
 interface Props { sales: Sale[] }
 
@@ -83,8 +83,8 @@ function KpiCard({
 }
 
 export function KpiCards({ sales }: Props) {
-  const total  = sales.reduce((s, x) => s + x.total, 0)
-  const count  = sales.length
+  const total  = sales.reduce((s, x) => s + saleAmount(x), 0) // net of returns
+  const count  = sales.filter(s => s.type === 'sale').length
   const profit = total * 0.4
   const avg    = count > 0 ? total / count : 0
 

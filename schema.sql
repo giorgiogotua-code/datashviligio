@@ -52,6 +52,8 @@ CREATE TABLE sales (
   total          DECIMAL(10, 2) NOT NULL,
   payment_method TEXT CHECK (payment_method IN ('cash', 'card')) NOT NULL,
   items_count    INTEGER NOT NULL DEFAULT 0,
+  type           TEXT NOT NULL DEFAULT 'sale' CHECK (type IN ('sale','return')),
+  reversal_of    UUID REFERENCES sales(id) ON DELETE SET NULL,   -- for returns: original sale
   -- Fiscalization (RS.GE cash register). is_fiscal = was a receipt requested for this sale.
   is_fiscal      BOOLEAN NOT NULL DEFAULT false,
   fiscal_status  TEXT NOT NULL DEFAULT 'none' CHECK (fiscal_status IN ('none','pending','success','failed')),
@@ -122,3 +124,58 @@ CREATE POLICY "authenticated full access" ON sales          FOR ALL TO authentic
 CREATE POLICY "authenticated full access" ON sale_items     FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON settings       FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON fiscal_reports FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- ============================================================
+--  ATOMIC SALE
+--  Insert sale + line items + adjust stock in one transaction.
+--  p_type = 'sale' lowers stock, 'return' restores it.
+--  SECURITY INVOKER -> runs as the caller, so RLS still applies.
+-- ============================================================
+CREATE OR REPLACE FUNCTION create_sale(
+  p_total          NUMERIC,
+  p_payment_method TEXT,
+  p_items_count    INTEGER,
+  p_is_fiscal      BOOLEAN,
+  p_items          JSONB,
+  p_type           TEXT DEFAULT 'sale',
+  p_reversal_of    UUID DEFAULT NULL
+) RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_sale sales;
+  v_item JSONB;
+  v_dir  INTEGER := CASE WHEN p_type = 'return' THEN 1 ELSE -1 END;
+BEGIN
+  INSERT INTO sales(total, payment_method, items_count, is_fiscal, fiscal_status, type, reversal_of)
+  VALUES (p_total, p_payment_method, p_items_count, p_is_fiscal,
+          CASE WHEN p_is_fiscal THEN 'pending' ELSE 'none' END, p_type, p_reversal_of)
+  RETURNING * INTO v_sale;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  LOOP
+    INSERT INTO sale_items(sale_id, product_id, product_name, barcode, quantity, unit_price, total_price)
+    VALUES (
+      v_sale.id,
+      NULLIF(v_item->>'product_id','')::uuid,
+      v_item->>'product_name',
+      v_item->>'barcode',
+      (v_item->>'quantity')::int,
+      (v_item->>'unit_price')::numeric,
+      (v_item->>'total_price')::numeric
+    );
+
+    IF NULLIF(v_item->>'product_id','') IS NOT NULL THEN
+      UPDATE products
+        SET quantity = GREATEST(0, quantity + v_dir * (v_item->>'quantity')::int)
+        WHERE id = (v_item->>'product_id')::uuid;
+    END IF;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'sale', to_jsonb(v_sale),
+    'items', (SELECT COALESCE(jsonb_agg(to_jsonb(si)), '[]'::jsonb) FROM sale_items si WHERE si.sale_id = v_sale.id)
+  );
+END;
+$$;

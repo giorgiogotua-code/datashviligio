@@ -23,12 +23,16 @@ export type Product = {
 
 export type FiscalStatus = 'none' | 'pending' | 'success' | 'failed'
 
+export type SaleType = 'sale' | 'return'
+
 export type Sale = {
   id: string
   total: number
   payment_method: 'cash' | 'card'
   items_count: number
   created_at: string
+  type: SaleType
+  reversal_of?: string | null // for returns: the original sale id
   // Fiscalization
   is_fiscal: boolean
   fiscal_status: FiscalStatus
@@ -46,4 +50,9 @@ export type SaleItem = {
   quantity: number
   unit_price: number
   total_price: number
+}
+
+/** Signed money value of a sale row: returns count as negative against revenue. */
+export function saleAmount(s: Pick<Sale, 'type' | 'total'>): number {
+  return s.type === 'return' ? -s.total : s.total
 }

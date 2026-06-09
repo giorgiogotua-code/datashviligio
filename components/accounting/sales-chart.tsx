@@ -1,7 +1,7 @@
 "use client"
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import type { Sale } from '@/lib/mock-data'
+import { saleAmount, type Sale } from '@/lib/mock-data'
 
 interface Props { sales: Sale[] }
 
@@ -26,8 +26,8 @@ export function SalesChart({ sales }: Props) {
     const d   = new Date(s.created_at)
     const key = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`
     if (!byDate[key]) byDate[key] = { revenue: 0, profit: 0 }
-    byDate[key].revenue += s.total
-    byDate[key].profit  += s.total * 0.4
+    byDate[key].revenue += saleAmount(s)
+    byDate[key].profit  += saleAmount(s) * 0.4
   })
 
   const data = Object.entries(byDate)

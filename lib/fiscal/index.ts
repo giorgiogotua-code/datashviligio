@@ -52,6 +52,15 @@ export interface FiscalResult {
   raw: Record<string, unknown>
 }
 
+export interface FiscalReversalInput {
+  items: FiscalLineItem[]
+  total: number
+  paymentMethod: 'cash' | 'card'
+  originalFiscalId: string // receipt number of the sale being reversed
+  originalDateTime?: string | null // ISO date of the original receipt
+  reason?: 'operator-error' | 'refund' | 'taxbase-reduction'
+}
+
 export type FiscalReportType = 'Z' | 'X'
 
 export interface FiscalReportResult {
@@ -63,6 +72,7 @@ export interface FiscalProvider {
   readonly id: string
   isConfigured(): boolean
   issueReceipt(input: FiscalReceiptInput): Promise<FiscalResult>
+  issueReversal(input: FiscalReversalInput): Promise<FiscalResult>
   printReport(type: FiscalReportType): Promise<FiscalReportResult>
 }
 
@@ -159,6 +169,30 @@ class ErpNetFpProvider implements FiscalProvider {
     return { fiscalId, qrUrl: null, raw: data }
   }
 
+  async issueReversal(input: FiscalReversalInput): Promise<FiscalResult> {
+    if (!this.isConfigured()) {
+      throw new FiscalError('not_configured', 'ფისკალური აპარატი არ არის კონფიგურირებული')
+    }
+    const printerId = await this.getPrinterId()
+    // ⚠️ DEVICE-SPECIFIC — reversal fields (USN, reason codes) to verify on the Georgian Daisy.
+    const body: Record<string, unknown> = {
+      reason: input.reason ?? 'refund',
+      receiptNumber: input.originalFiscalId,
+      receiptDateTime: input.originalDateTime ?? undefined,
+      items: input.items.map((i) => ({
+        text: i.name,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        taxGroup: TAX_GROUP,
+      })),
+      payments: [{ amount: input.total, paymentType: input.paymentMethod }],
+    }
+    const data = await this.request(`/printers/${printerId}/reversalreceipt`, body)
+    const fiscalId = (data.receiptNumber as string) ?? ''
+    if (!fiscalId) throw new FiscalError('device_error', 'აპარატმა დაბრუნების ჩეკის ნომერი არ დააბრუნა')
+    return { fiscalId, qrUrl: null, raw: data }
+  }
+
   async printReport(type: FiscalReportType): Promise<FiscalReportResult> {
     if (!this.isConfigured()) {
       throw new FiscalError('not_configured', 'ფისკალური აპარატი არ არის კონფიგურირებული')
@@ -179,6 +213,10 @@ export function getFiscalProvider(): FiscalProvider {
 
 export function issueFiscalReceipt(input: FiscalReceiptInput): Promise<FiscalResult> {
   return getFiscalProvider().issueReceipt(input)
+}
+
+export function issueFiscalReversal(input: FiscalReversalInput): Promise<FiscalResult> {
+  return getFiscalProvider().issueReversal(input)
 }
 
 export function printFiscalReport(type: FiscalReportType): Promise<FiscalReportResult> {

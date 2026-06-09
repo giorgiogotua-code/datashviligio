@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Receipt, ReceiptText, RotateCw, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Receipt, ReceiptText, RotateCw, Loader2, Undo2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { issueFiscalReceipt, FiscalError } from '@/lib/fiscal'
+import { ReturnDialog } from '@/components/accounting/return-dialog'
 import { toast } from 'sonner'
 import type { Sale, SaleItem } from '@/lib/mock-data'
 
@@ -33,6 +34,7 @@ export function SalesHistory({ sales, saleItems }: Props) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [retryingId, setRetryingId] = useState<string | null>(null)
+  const [returnSale, setReturnSale] = useState<Sale | null>(null)
 
   async function retryFiscal(sale: Sale, items: SaleItem[]) {
     setRetryingId(sale.id)
@@ -119,7 +121,14 @@ export function SalesHistory({ sales, saleItems }: Props) {
                         {isExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{(page - 1) * PAGE_SIZE + i + 1}</td>
-                      <td className="px-4 py-3 text-foreground">{date}</td>
+                      <td className="px-4 py-3 text-foreground">
+                        <span className="flex items-center gap-1.5">
+                          {date}
+                          {sale.type === 'return' && (
+                            <Badge className="bg-amber-100 text-amber-700 gap-1"><Undo2 className="size-3" />დაბრუნება</Badge>
+                          )}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{time}</td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant="secondary">{sale.items_count}</Badge>
@@ -144,7 +153,9 @@ export function SalesHistory({ sales, saleItems }: Props) {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-right font-bold text-primary">₾{sale.total.toFixed(2)}</td>
+                      <td className={cn('px-4 py-3 text-right font-bold', sale.type === 'return' ? 'text-amber-600' : 'text-primary')}>
+                        {sale.type === 'return' ? '−' : ''}₾{sale.total.toFixed(2)}
+                      </td>
                     </tr>
                     {isExpanded && (
                       <tr key={`${sale.id}-expand`} className="border-b border-border/50 bg-muted/20">
@@ -181,6 +192,17 @@ export function SalesHistory({ sales, saleItems }: Props) {
                               )}
                             </div>
                           )}
+                          {sale.type === 'sale' && (
+                            <div className="flex justify-end mt-3">
+                              <Button
+                                size="sm" variant="outline"
+                                onClick={(e) => { e.stopPropagation(); setReturnSale(sale) }}
+                                className="h-8 rounded-lg gap-1.5 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
+                              >
+                                <Undo2 className="size-3.5" /> დაბრუნება
+                              </Button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}
@@ -201,6 +223,13 @@ export function SalesHistory({ sales, saleItems }: Props) {
           </div>
         )}
       </div>
+
+      <ReturnDialog
+        open={!!returnSale}
+        onClose={() => setReturnSale(null)}
+        sale={returnSale}
+        items={returnSale ? saleItems.filter(si => si.sale_id === returnSale.id) : []}
+      />
     </div>
   )
 }
