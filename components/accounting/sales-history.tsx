@@ -73,7 +73,11 @@ export function SalesHistory({ sales, saleItems }: Props) {
       <div className="flex gap-3 flex-wrap">
         <Select value={method} onValueChange={(v: string | null) => { setMethod(v ?? 'all'); setPage(1) }}>
           <SelectTrigger className="w-40">
-            <SelectValue />
+            <SelectValue>
+              {(value: string | null) =>
+                ({ all: 'ყველა', cash: 'ნაღდი', card: 'ბარათი' }[value ?? 'all'] ?? 'ყველა')
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">ყველა</SelectItem>

@@ -247,7 +247,13 @@ export function CategoryTree({ selectedId, onSelect }: Props) {
               <label className="text-[11px] font-black text-muted-foreground uppercase tracking-wider pl-1">მშობელი კატეგორია</label>
               <Select value={form.parent_id} onValueChange={(v: string | null) => setForm(p => ({ ...p, parent_id: v === 'none' || v === null ? '' : v }))}>
                 <SelectTrigger className="h-12 rounded-2xl border-border/50 bg-white focus:ring-primary/20">
-                  <SelectValue placeholder="— მთავარი —" />
+                  <SelectValue placeholder="★ მთავარი კატეგორია">
+                    {(value: string | null) =>
+                      !value || value === 'none'
+                        ? '★ მთავარი კატეგორია'
+                        : categories.find(c => c.id === value)?.name ?? '★ მთავარი კატეგორია'
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl border-border/50">
                   <SelectItem value="none" className="rounded-xl mt-1 text-primary font-bold">★ მთავარი კატეგორია</SelectItem>
