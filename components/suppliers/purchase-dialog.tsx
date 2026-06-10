@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useMemo, useEffect } from 'react'
-import { Search, Plus, Trash2, Package, ShoppingBag, Loader2 } from 'lucide-react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { Search, Plus, Trash2, Package, ShoppingBag, Loader2, ScanLine } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useStore } from '@/lib/store'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
 import type { PurchaseItem } from '@/lib/mock-data'
 
 interface Props {
@@ -56,6 +57,32 @@ export function PurchaseDialog({ open, onClose, presetSupplierId }: Props) {
   const updateLine = (id: string, patch: Partial<Line>) =>
     setLines(prev => prev.map(l => l.product_id === id ? { ...l, ...patch } : l))
   const removeLine = (id: string) => setLines(prev => prev.filter(l => l.product_id !== id))
+
+  // Barcode: scanner (global) + manual Enter both add the matching product.
+  // dedup so a scan into the focused input doesn't add twice.
+  const lastAdd = useRef<{ code: string; t: number }>({ code: '', t: 0 })
+  const addByBarcode = (raw: string) => {
+    const code = raw.trim()
+    if (!code) return
+    const now = Date.now()
+    if (lastAdd.current.code === code && now - lastAdd.current.t < 500) return
+    const p = products.find(pr => pr.barcode === code)
+    if (!p) { toast.error(`შტრიხკოდი ვერ მოიძებნა: ${code}`); return }
+    lastAdd.current = { code, t: now }
+    addLine(p)
+    toast.success(`✓ ${p.name}`, { duration: 1200 })
+  }
+
+  // Hardware scanner — active only while this dialog is open.
+  useBarcodeScanner({ onScan: addByBarcode, disabled: !open })
+
+  const handleSearchEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const exact = products.find(pr => pr.barcode === search.trim())
+    if (exact) addByBarcode(search)
+    else if (results.length === 1) { addLine(results[0]); setSearch('') }
+  }
 
   const total = lines.reduce((s, l) => s + l.quantity * l.unit_cost, 0)
   const itemsCount = lines.reduce((s, l) => s + l.quantity, 0)
@@ -113,10 +140,13 @@ export function PurchaseDialog({ open, onClose, presetSupplierId }: Props) {
 
           {/* Product search */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide pl-1">პროდუქციის დამატება</label>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide pl-1 flex items-center gap-1.5">
+              პროდუქციის დამატება
+              <span className="inline-flex items-center gap-1 text-primary/70 normal-case font-medium"><ScanLine className="size-3" /> სკანერი მუშაობს</span>
+            </label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input className="h-11 pl-9 rounded-xl" placeholder="სახელი ან შტრიხკოდი..." value={search} onChange={e => setSearch(e.target.value)} />
+              <Input className="h-11 pl-9 rounded-xl" placeholder="სახელი ან შტრიხკოდი (დაასკანერე ან აკრიფე)..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={handleSearchEnter} autoFocus />
               {results.length > 0 && (
                 <div className="absolute z-20 top-12 left-0 right-0 bg-white rounded-xl border border-border shadow-xl overflow-hidden max-h-56 overflow-y-auto">
                   {results.map(p => (
