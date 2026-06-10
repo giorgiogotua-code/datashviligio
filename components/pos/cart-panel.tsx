@@ -141,22 +141,24 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
   }
 
   return (
-    <aside className={cn("w-full lg:w-96 shrink-0 bg-card/95 backdrop-blur-3xl border border-primary/10 shadow-2xl shadow-primary/5 rounded-[24px] flex flex-col overflow-hidden animate-slide-right", className)}>
+    <aside className={cn("w-full lg:w-96 shrink-0 flex flex-col overflow-hidden animate-slide-right rounded-[28px] bg-white ring-1 ring-primary/10 border border-white/70 shadow-[0_24px_70px_-22px_var(--color-primary)]", className)}>
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-4 border-b border-primary/10 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
-        <div className="flex items-center gap-2.5">
-          <div className={cn('size-8 rounded-xl bg-gradient-to-br from-primary to-indigo-600 flex items-center justify-center shadow-md shadow-primary/25', cartBounce && 'animate-cart-bounce')}>
-            <ShoppingCart className="size-4 text-white" />
+      {/* Header — branded gradient band so the cart stands out from the light app */}
+      <div className="relative flex items-center justify-between px-5 py-4 bg-gradient-to-r from-primary via-indigo-600 to-violet-600 overflow-hidden">
+        <div className="absolute -top-8 -right-6 size-28 bg-white/15 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-0 h-px bg-white/15" />
+        <div className="flex items-center gap-3 relative z-10">
+          <div className={cn('size-9 rounded-2xl bg-white/20 ring-1 ring-white/30 backdrop-blur flex items-center justify-center', cartBounce && 'animate-cart-bounce')}>
+            <ShoppingCart className="size-4.5 text-white" />
           </div>
           <div>
-            <p className="text-sm font-bold text-foreground leading-tight">კალათა</p>
-            {count > 0 && <p className="text-[11px] text-muted-foreground">{count} პოზიცია</p>}
+            <p className="text-[15px] font-black text-white leading-tight tracking-tight">კალათა</p>
+            <p className="text-[11px] text-white/75 leading-none mt-0.5">{count > 0 ? `${count} პოზიცია` : 'ცარიელია'}</p>
           </div>
         </div>
         {items.length > 0 && (
-          <button onClick={() => setClearOpen(true)} className="size-7 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-muted-foreground transition-all">
-            <Trash2 className="size-3.5" />
+          <button onClick={() => setClearOpen(true)} className="relative z-10 size-8 rounded-xl text-white/75 hover:bg-white/15 hover:text-white flex items-center justify-center transition-all">
+            <Trash2 className="size-4" />
           </button>
         )}
       </div>
@@ -165,8 +167,8 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
         {items.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground py-16 gap-4">
-            <div className="size-16 rounded-2xl bg-muted flex items-center justify-center">
-              <ShoppingCart className="size-7 opacity-20" />
+            <div className="size-16 rounded-2xl bg-primary/8 ring-1 ring-primary/10 flex items-center justify-center">
+              <ShoppingCart className="size-7 text-primary/30" />
             </div>
             <div className="text-center">
               <p className="text-sm font-semibold">კალათა ცარიელია</p>
@@ -176,7 +178,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
         ) : items.map((item, idx) => (
           <div
             key={item.product_id}
-            className="animate-fade-up flex items-center gap-2.5 bg-primary/5 hover:bg-primary/10 rounded-2xl p-2.5 transition-colors group"
+            className="animate-fade-up flex items-center gap-2.5 bg-white border border-slate-100 hover:border-primary/20 shadow-sm hover:shadow-md rounded-2xl p-2.5 transition-all group"
             style={{ animationDelay: `${idx * 40}ms` }}
           >
             {item.photo_url ? (
@@ -247,7 +249,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
         </div>
 
         {/* Totals */}
-        <div className="flex flex-col gap-1.5 bg-primary/5 rounded-2xl px-4 py-3 border border-primary/5">
+        <div className="flex flex-col gap-1.5 bg-gradient-to-br from-primary/5 to-indigo-50/50 rounded-2xl px-4 py-3 border border-primary/10">
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">პოზიციები:</span>
             <span className="font-semibold text-foreground">{count}</span>

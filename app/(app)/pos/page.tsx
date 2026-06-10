@@ -168,7 +168,7 @@ export default function POSPage() {
                  onRemove={removeFromCart}
                  onClear={clearCart}
                  onResume={resumeCart}
-                 className="h-full w-full border border-border/50 rounded-3xl shadow-[0_-8px_30px_-10px_rgba(0,0,0,0.1)]"
+                 className="h-full w-full"
                />
             </div>
           </SheetContent>
