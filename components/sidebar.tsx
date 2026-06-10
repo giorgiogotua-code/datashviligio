@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Package, ShoppingCart, BarChart2, Smartphone, Zap, Settings, Lock, X, Wrench, Menu } from 'lucide-react'
+import { Package, ShoppingCart, BarChart2, Smartphone, Zap, Settings, Lock, X, Wrench, Menu, Truck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { useEffect } from 'react'
@@ -10,6 +10,7 @@ import { useEffect } from 'react'
 const NAV_ITEMS = [
   { href: '/warehouse', icon: Package,      label: 'საწყობი',      color: 'from-blue-500 to-indigo-600' },
   { href: '/pos',       icon: ShoppingCart, label: 'POS სალარო',   color: 'from-violet-500 to-purple-600' },
+  { href: '/suppliers', icon: Truck,        label: 'მომწოდებლები', color: 'from-cyan-500 to-blue-600' },
   { href: '/accounting',icon: BarChart2,    label: 'ბუღალტერია',   color: 'from-emerald-500 to-teal-600' },
   { href: '/tools',     icon: Wrench,       label: 'ხელსაწყოები',  color: 'from-orange-500 to-amber-600' },
   { href: '/settings',  icon: Settings,     label: 'პარამეტრები',  color: 'from-slate-500 to-slate-700' },

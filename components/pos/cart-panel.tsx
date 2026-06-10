@@ -141,10 +141,10 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
   }
 
   return (
-    <aside className={cn("w-full lg:w-96 shrink-0 glass rounded-[24px] flex flex-col overflow-hidden animate-slide-right", className)}>
+    <aside className={cn("w-full lg:w-96 shrink-0 bg-card/95 backdrop-blur-3xl border border-primary/10 shadow-2xl shadow-primary/5 rounded-[24px] flex flex-col overflow-hidden animate-slide-right", className)}>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-4 border-b border-border bg-gradient-to-r from-muted/40 to-transparent">
+      <div className="flex items-center justify-between px-4 py-4 border-b border-primary/10 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
         <div className="flex items-center gap-2.5">
           <div className={cn('size-8 rounded-xl bg-gradient-to-br from-primary to-indigo-600 flex items-center justify-center shadow-md shadow-primary/25', cartBounce && 'animate-cart-bounce')}>
             <ShoppingCart className="size-4 text-white" />
@@ -176,7 +176,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
         ) : items.map((item, idx) => (
           <div
             key={item.product_id}
-            className="animate-fade-up flex items-center gap-2.5 bg-muted/30 hover:bg-muted/50 rounded-2xl p-2.5 transition-colors group"
+            className="animate-fade-up flex items-center gap-2.5 bg-primary/5 hover:bg-primary/10 rounded-2xl p-2.5 transition-colors group"
             style={{ animationDelay: `${idx * 40}ms` }}
           >
             {item.photo_url ? (
@@ -247,7 +247,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
         </div>
 
         {/* Totals */}
-        <div className="flex flex-col gap-1.5 bg-muted/30 rounded-2xl px-4 py-3">
+        <div className="flex flex-col gap-1.5 bg-primary/5 rounded-2xl px-4 py-3 border border-primary/5">
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">პოზიციები:</span>
             <span className="font-semibold text-foreground">{count}</span>

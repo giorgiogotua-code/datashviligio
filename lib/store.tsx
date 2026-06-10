@@ -11,6 +11,10 @@ import {
   type HeldCart,
   type HeldCartItem,
   type DiscountType,
+  type Supplier,
+  type Purchase,
+  type PurchaseItem,
+  type SupplierPayment,
 } from './mock-data'
 
 const supabase = createClient()
@@ -28,6 +32,10 @@ export interface StoreState {
   sales: Sale[]
   saleItems: SaleItem[]
   heldCarts: HeldCart[]
+  suppliers: Supplier[]
+  purchases: Purchase[]
+  purchaseItems: PurchaseItem[]
+  supplierPayments: SupplierPayment[]
   settings: Settings
   pin: string
   isHydrated: boolean
@@ -64,6 +72,15 @@ export interface StoreState {
     items_count: number
   }) => Promise<void>
   deleteHeldCart: (id: string) => Promise<void>
+  // Suppliers & purchasing
+  addSupplier: (s: Pick<Supplier, 'name' | 'phone' | 'contact' | 'address' | 'note'>) => Promise<Supplier | null>
+  updateSupplier: (id: string, s: Partial<Supplier>) => Promise<void>
+  deleteSupplier: (id: string) => Promise<void>
+  createPurchase: (
+    purchase: { supplier_id: string | null; supplier_name: string | null; total: number; paid: number; items_count: number; note: string | null },
+    items: Omit<PurchaseItem, 'id' | 'purchase_id'>[]
+  ) => Promise<Purchase | null>
+  paySupplier: (supplierId: string, amount: number, note?: string | null) => Promise<void>
   addReturn: (
     original: Sale,
     items: Omit<SaleItem, 'id' | 'sale_id'>[]
@@ -130,6 +147,55 @@ function mapHeldCart(r: any): HeldCart {
   }
 }
 
+function mapSupplier(r: any): Supplier {
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone ?? null,
+    contact: r.contact ?? null,
+    address: r.address ?? null,
+    note: r.note ?? null,
+    balance: num(r.balance),
+    created_at: r.created_at,
+  }
+}
+
+function mapPurchase(r: any): Purchase {
+  return {
+    id: r.id,
+    supplier_id: r.supplier_id ?? null,
+    supplier_name: r.supplier_name ?? null,
+    total: num(r.total),
+    paid: num(r.paid),
+    items_count: num(r.items_count),
+    note: r.note ?? null,
+    created_at: r.created_at,
+  }
+}
+
+function mapPurchaseItem(r: any): PurchaseItem {
+  return {
+    id: r.id,
+    purchase_id: r.purchase_id,
+    product_id: r.product_id ?? null,
+    product_name: r.product_name,
+    barcode: r.barcode ?? null,
+    quantity: num(r.quantity),
+    unit_cost: num(r.unit_cost),
+    total_cost: num(r.total_cost),
+  }
+}
+
+function mapSupplierPayment(r: any): SupplierPayment {
+  return {
+    id: r.id,
+    supplier_id: r.supplier_id,
+    amount: num(r.amount),
+    note: r.note ?? null,
+    created_at: r.created_at,
+  }
+}
+
 function mapSaleItem(r: any): SaleItem {
   return {
     id: r.id,
@@ -167,6 +233,10 @@ export const useStore = create<StoreState>()(
       sales: [],
       saleItems: [],
       heldCarts: [],
+      suppliers: [],
+      purchases: [],
+      purchaseItems: [],
+      supplierPayments: [],
       settings: DEFAULT_SETTINGS,
       pin: '1234',
       isHydrated: false,
@@ -176,13 +246,17 @@ export const useStore = create<StoreState>()(
 
       // ---- Load everything from Supabase ----
       hydrate: async () => {
-        const [cats, prods, sales, items, settingsRows, held] = await Promise.all([
+        const [cats, prods, sales, items, settingsRows, held, sups, purch, purchItems, supPays] = await Promise.all([
           supabase.from('categories').select('*').order('created_at', { ascending: true }),
           supabase.from('products').select('*').order('created_at', { ascending: false }),
           supabase.from('sales').select('*').order('created_at', { ascending: false }),
           supabase.from('sale_items').select('*'),
           supabase.from('settings').select('*'),
           supabase.from('held_carts').select('*').order('created_at', { ascending: false }),
+          supabase.from('suppliers').select('*').order('created_at', { ascending: false }),
+          supabase.from('purchases').select('*').order('created_at', { ascending: false }),
+          supabase.from('purchase_items').select('*'),
+          supabase.from('supplier_payments').select('*').order('created_at', { ascending: false }),
         ])
 
         if (cats.error || prods.error || sales.error || items.error || settingsRows.error) {
@@ -191,8 +265,10 @@ export const useStore = create<StoreState>()(
           set({ isHydrated: true })
           return
         }
-        // held_carts is non-critical (new table); don't fail hydrate if it errors
+        // held_carts + supplier tables are non-critical (newer tables); don't fail hydrate if they error
         if (held.error) console.error('held_carts load error', held.error)
+        if (sups.error || purch.error || purchItems.error || supPays.error)
+          console.error('suppliers load error', { sups, purch, purchItems, supPays })
 
         // settings key-value rows -> Settings object (+ pin)
         const kv: Record<string, string> = {}
@@ -210,6 +286,10 @@ export const useStore = create<StoreState>()(
           sales: (sales.data ?? []).map(mapSale),
           saleItems: (items.data ?? []).map(mapSaleItem),
           heldCarts: (held.data ?? []).map(mapHeldCart),
+          suppliers: (sups.data ?? []).map(mapSupplier),
+          purchases: (purch.data ?? []).map(mapPurchase),
+          purchaseItems: (purchItems.data ?? []).map(mapPurchaseItem),
+          supplierPayments: (supPays.data ?? []).map(mapSupplierPayment),
           settings,
           pin: kv.pin ?? '1234',
           isHydrated: true,
@@ -414,6 +494,77 @@ export const useStore = create<StoreState>()(
         const { error } = await supabase.from('held_carts').delete().eq('id', id)
         if (failed(error, 'გადადებული კალათის წაშლა ვერ მოხერხდა')) return
         set((state) => ({ heldCarts: state.heldCarts.filter((c) => c.id !== id) }))
+      },
+
+      // ---- Suppliers ----
+      addSupplier: async (s) => {
+        const { data, error } = await supabase
+          .from('suppliers')
+          .insert({ name: s.name, phone: s.phone, contact: s.contact, address: s.address, note: s.note })
+          .select()
+          .single()
+        if (failed(error, 'მომწოდებლის დამატება ვერ მოხერხდა') || !data) return null
+        const sup = mapSupplier(data)
+        set((state) => ({ suppliers: [sup, ...state.suppliers] }))
+        return sup
+      },
+
+      updateSupplier: async (id, s) => {
+        const { error } = await supabase.from('suppliers').update(s).eq('id', id)
+        if (failed(error, 'მომწოდებლის განახლება ვერ მოხერხდა')) return
+        set((state) => ({ suppliers: state.suppliers.map((x) => (x.id === id ? { ...x, ...s } : x)) }))
+      },
+
+      deleteSupplier: async (id) => {
+        const { error } = await supabase.from('suppliers').delete().eq('id', id)
+        if (failed(error, 'მომწოდებლის წაშლა ვერ მოხერხდა')) return
+        set((state) => ({ suppliers: state.suppliers.filter((x) => x.id !== id) }))
+      },
+
+      // ---- Purchasing (atomic: stock up + cost refresh + supplier debt) ----
+      createPurchase: async (purchase, items) => {
+        const { data, error } = await supabase.rpc('create_purchase', {
+          p_supplier_id: purchase.supplier_id,
+          p_supplier_name: purchase.supplier_name,
+          p_total: purchase.total,
+          p_paid: purchase.paid,
+          p_items_count: purchase.items_count,
+          p_note: purchase.note,
+          p_items: items,
+        })
+        if (failed(error, 'შესყიდვის შენახვა ვერ მოხერხდა') || !data) return null
+
+        const newPurchase = mapPurchase((data as any).purchase)
+        const savedItems = ((data as any).items ?? []) as any[]
+        set((state) => ({
+          purchases: [newPurchase, ...state.purchases],
+          purchaseItems: [...state.purchaseItems, ...savedItems.map(mapPurchaseItem)],
+          // raise stock + refresh cost locally
+          products: state.products.map((p) => {
+            const bought = items.find((i) => i.product_id === p.id)
+            return bought ? { ...p, quantity: p.quantity + bought.quantity, purchase_price: bought.unit_cost } : p
+          }),
+          // add unpaid remainder to supplier balance locally
+          suppliers: state.suppliers.map((s) =>
+            s.id === purchase.supplier_id ? { ...s, balance: s.balance + (purchase.total - purchase.paid) } : s
+          ),
+        }))
+        return newPurchase
+      },
+
+      paySupplier: async (supplierId, amount, note) => {
+        const { data, error } = await supabase.rpc('pay_supplier', {
+          p_supplier_id: supplierId,
+          p_amount: amount,
+          p_note: note ?? null,
+        })
+        if (failed(error, 'გადახდის შენახვა ვერ მოხერხდა') || !data) return
+        const payment = mapSupplierPayment((data as any).payment)
+        const supplier = mapSupplier((data as any).supplier)
+        set((state) => ({
+          supplierPayments: [payment, ...state.supplierPayments],
+          suppliers: state.suppliers.map((s) => (s.id === supplierId ? supplier : s)),
+        }))
       },
 
       // ---- Fiscal result of a sale (called after the device responds) ----

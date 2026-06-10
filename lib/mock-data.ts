@@ -58,6 +58,48 @@ export function saleAmount(s: Pick<Sale, 'type' | 'total'>): number {
   return s.type === 'return' ? -s.total : s.total
 }
 
+// ---- Suppliers & purchasing ----
+export type Supplier = {
+  id: string
+  name: string
+  phone: string | null
+  contact: string | null
+  address: string | null
+  note: string | null
+  balance: number          // amount WE OWE the supplier (positive = our debt)
+  created_at: string
+}
+
+export type Purchase = {
+  id: string
+  supplier_id: string | null
+  supplier_name: string | null
+  total: number
+  paid: number
+  items_count: number
+  note: string | null
+  created_at: string
+}
+
+export type PurchaseItem = {
+  id: string
+  purchase_id: string
+  product_id: string | null
+  product_name: string
+  barcode: string | null
+  quantity: number
+  unit_cost: number
+  total_cost: number
+}
+
+export type SupplierPayment = {
+  id: string
+  supplier_id: string
+  amount: number
+  note: string | null
+  created_at: string
+}
+
 export type DiscountType = 'amount' | 'percent'
 
 /** A single line item inside a held (parked) cart. Mirrors the POS CartItem shape. */

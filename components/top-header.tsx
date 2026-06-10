@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut, AlertTriangle, PackageX, CheckCircle2 } from 'lucide-react'
+import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut, AlertTriangle, PackageX, CheckCircle2, Truck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { createClient } from '@/lib/supabase/client'
@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 const MODULE_MAP: Record<string, { label: string; icon: React.ElementType; gradient: string; sub: string }> = {
   '/warehouse': { label: 'საწყობი',      icon: Package,      gradient: 'from-blue-500 to-indigo-600',   sub: 'პროდუქციის მართვა' },
   '/pos':       { label: 'POS სალარო',   icon: ShoppingCart, gradient: 'from-violet-500 to-purple-600', sub: 'სალაროს ოპერაციები' },
+  '/suppliers': { label: 'მომწოდებლები', icon: Truck,        gradient: 'from-cyan-500 to-blue-600',     sub: 'შესყიდვები და ვალები' },
   '/accounting':{ label: 'ბუღალტერია',   icon: BarChart2,    gradient: 'from-emerald-500 to-teal-600',  sub: 'ანგარიშები & ანალიტიკა' },
   '/settings':  { label: 'პარამეტრები',  icon: Settings,     gradient: 'from-slate-500 to-slate-700',   sub: 'სისტემის კონფიგურაცია' },
 }
