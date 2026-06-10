@@ -1,6 +1,11 @@
-const CACHE = 'pos-v1'
+// Network-first service worker.
+// Cache-first was serving stale JS after deploys (e.g. an old POS cart),
+// so we prefer the network and only fall back to cache when offline.
+const CACHE = 'pos-v2'
 
-self.addEventListener('install', () => { self.skipWaiting() })
+self.addEventListener('install', () => {
+  self.skipWaiting()
+})
 
 self.addEventListener('activate', e => {
   e.waitUntil(
@@ -13,22 +18,23 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url)
 
-  // Skip: non-GET, API, Supabase, R2, external
+  // Only handle same-origin GET; let API/Supabase/R2/cross-origin pass through.
   if (e.request.method !== 'GET') return
-  if (url.pathname.startsWith('/api/')) return
   if (url.hostname !== self.location.hostname) return
+  if (url.pathname.startsWith('/api/')) return
 
-  const dest = e.request.destination
-  if (dest === 'script' || dest === 'style' || dest === 'font' || dest === 'image') {
-    e.respondWith(
-      caches.open(CACHE).then(cache =>
-        cache.match(e.request).then(cached =>
-          cached || fetch(e.request).then(res => {
-            if (res.ok) cache.put(e.request, res.clone())
-            return res
-          })
-        )
-      )
-    )
-  }
+  // Network-first: always try the latest, fall back to cache when offline.
+  e.respondWith(
+    fetch(e.request)
+      .then(res => {
+        // Cache successful static assets for offline use.
+        const dest = e.request.destination
+        if (res.ok && (dest === 'script' || dest === 'style' || dest === 'font' || dest === 'image')) {
+          const copy = res.clone()
+          caches.open(CACHE).then(c => c.put(e.request, copy))
+        }
+        return res
+      })
+      .catch(() => caches.match(e.request))
+  )
 })
