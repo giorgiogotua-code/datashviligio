@@ -16,3 +16,8 @@ node_modules
 
 # Build artifacts
 *.tsbuildinfo
+
+# Cloudflare / OpenNext
+.open-next/
+.wrangler/
+.dev.vars
