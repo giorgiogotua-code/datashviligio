@@ -8,6 +8,9 @@ import {
   type Sale,
   type SaleItem,
   type FiscalStatus,
+  type HeldCart,
+  type HeldCartItem,
+  type DiscountType,
 } from './mock-data'
 
 const supabase = createClient()
@@ -24,6 +27,7 @@ export interface StoreState {
   products: Product[]
   sales: Sale[]
   saleItems: SaleItem[]
+  heldCarts: HeldCart[]
   settings: Settings
   pin: string
   isHydrated: boolean
@@ -46,9 +50,20 @@ export interface StoreState {
   updateProduct: (id: string, p: Partial<Product>) => Promise<void>
   deleteProduct: (id: string) => Promise<void>
   addSale: (
-    sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'>,
+    sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'> & { discount?: number },
     items: Omit<SaleItem, 'id' | 'sale_id'>[]
   ) => Promise<Sale | null>
+  // Held (parked) carts — persisted in Supabase so they survive refresh.
+  holdCart: (cart: {
+    label?: string | null
+    items: HeldCartItem[]
+    discount: number
+    discount_type: DiscountType | null
+    discount_value: number
+    total: number
+    items_count: number
+  }) => Promise<void>
+  deleteHeldCart: (id: string) => Promise<void>
   addReturn: (
     original: Sale,
     items: Omit<SaleItem, 'id' | 'sale_id'>[]
@@ -87,6 +102,7 @@ function mapSale(r: any): Sale {
   return {
     id: r.id,
     total: num(r.total),
+    discount: num(r.discount),
     payment_method: r.payment_method,
     items_count: num(r.items_count),
     created_at: r.created_at,
@@ -97,6 +113,20 @@ function mapSale(r: any): Sale {
     fiscal_id: r.fiscal_id ?? null,
     fiscal_data: r.fiscal_data ?? null,
     fiscalized_at: r.fiscalized_at ?? null,
+  }
+}
+
+function mapHeldCart(r: any): HeldCart {
+  return {
+    id: r.id,
+    label: r.label ?? null,
+    items: Array.isArray(r.items) ? (r.items as HeldCartItem[]) : [],
+    discount: num(r.discount),
+    discount_type: r.discount_type ?? null,
+    discount_value: num(r.discount_value),
+    total: num(r.total),
+    items_count: num(r.items_count),
+    created_at: r.created_at,
   }
 }
 
@@ -136,6 +166,7 @@ export const useStore = create<StoreState>()(
       products: [],
       sales: [],
       saleItems: [],
+      heldCarts: [],
       settings: DEFAULT_SETTINGS,
       pin: '1234',
       isHydrated: false,
@@ -145,12 +176,13 @@ export const useStore = create<StoreState>()(
 
       // ---- Load everything from Supabase ----
       hydrate: async () => {
-        const [cats, prods, sales, items, settingsRows] = await Promise.all([
+        const [cats, prods, sales, items, settingsRows, held] = await Promise.all([
           supabase.from('categories').select('*').order('created_at', { ascending: true }),
           supabase.from('products').select('*').order('created_at', { ascending: false }),
           supabase.from('sales').select('*').order('created_at', { ascending: false }),
           supabase.from('sale_items').select('*'),
           supabase.from('settings').select('*'),
+          supabase.from('held_carts').select('*').order('created_at', { ascending: false }),
         ])
 
         if (cats.error || prods.error || sales.error || items.error || settingsRows.error) {
@@ -159,6 +191,8 @@ export const useStore = create<StoreState>()(
           set({ isHydrated: true })
           return
         }
+        // held_carts is non-critical (new table); don't fail hydrate if it errors
+        if (held.error) console.error('held_carts load error', held.error)
 
         // settings key-value rows -> Settings object (+ pin)
         const kv: Record<string, string> = {}
@@ -175,6 +209,7 @@ export const useStore = create<StoreState>()(
           products: (prods.data ?? []).map(mapProduct),
           sales: (sales.data ?? []).map(mapSale),
           saleItems: (items.data ?? []).map(mapSaleItem),
+          heldCarts: (held.data ?? []).map(mapHeldCart),
           settings,
           pin: kv.pin ?? '1234',
           isHydrated: true,
@@ -295,8 +330,23 @@ export const useStore = create<StoreState>()(
           p_is_fiscal: sale.is_fiscal,
           p_items: items,
           p_type: 'sale',
+          p_discount: sale.discount ?? 0,
         })
-        if (failed(error, 'გაყიდვის შენახვა ვერ მოხერხდა') || !data) return null
+        if (error) {
+          // Server rejected an oversell (stock changed under us) — show real stock.
+          const m = (error as { message?: string }).message ?? ''
+          if (m.includes('INSUFFICIENT_STOCK')) {
+            const [name, avail] = m.split('INSUFFICIENT_STOCK:')[1]?.split(':') ?? []
+            toast.error(`${name || 'პროდუქტი'} — მარაგში მხოლოდ ${avail || 0} ცალია`)
+            // Resync product stock so the cart reflects reality.
+            const { data: fresh } = await supabase.from('products').select('*')
+            if (fresh) set({ products: fresh.map(mapProduct) })
+            return null
+          }
+          failed(error, 'გაყიდვის შენახვა ვერ მოხერხდა')
+          return null
+        }
+        if (!data) return null
 
         const saleRow = (data as any).sale
         const savedItems = ((data as any).items ?? []) as any[]
@@ -339,6 +389,31 @@ export const useStore = create<StoreState>()(
           }),
         }))
         return newReturn
+      },
+
+      // ---- Held (parked) carts ----
+      holdCart: async (cart) => {
+        const { data, error } = await supabase
+          .from('held_carts')
+          .insert({
+            label: cart.label ?? null,
+            items: cart.items,
+            discount: cart.discount,
+            discount_type: cart.discount_type,
+            discount_value: cart.discount_value,
+            total: cart.total,
+            items_count: cart.items_count,
+          })
+          .select()
+          .single()
+        if (failed(error, 'კალათის გადადება ვერ მოხერხდა') || !data) return
+        set((state) => ({ heldCarts: [mapHeldCart(data), ...state.heldCarts] }))
+      },
+
+      deleteHeldCart: async (id) => {
+        const { error } = await supabase.from('held_carts').delete().eq('id', id)
+        if (failed(error, 'გადადებული კალათის წაშლა ვერ მოხერხდა')) return
+        set((state) => ({ heldCarts: state.heldCarts.filter((c) => c.id !== id) }))
       },
 
       // ---- Fiscal result of a sale (called after the device responds) ----

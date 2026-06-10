@@ -14,17 +14,29 @@ export default function POSPage() {
   const { products } = useStore()
   const [cartItems, setCartItems] = useState<CartItem[]>([])
   const cartItemsRef = useRef(cartItems)
+  const productsRef = useRef(products)
   const [qtyConfirmObj, setQtyConfirmObj] = useState<{ productId: string, newQty: number } | null>(null)
 
   useEffect(() => {
     cartItemsRef.current = cartItems
   }, [cartItems])
 
+  useEffect(() => {
+    productsRef.current = products
+  }, [products])
+
+  // Available stock for a product (always read fresh, not from a stale closure).
+  const stockOf = (id: string) => productsRef.current.find(p => p.id === id)?.quantity ?? 0
+
   const addToCart = useCallback((item: CartItem) => {
+    const stock = stockOf(item.product_id)
     const existing = cartItemsRef.current.find(i => i.product_id === item.product_id)
     if (existing) {
-      setQtyConfirmObj({ productId: item.product_id, newQty: existing.quantity + 1 })
+      const newQty = existing.quantity + 1
+      if (newQty > stock) { toast.warning(`მხოლოდ ${stock} ცალია მარაგში`); return }
+      setQtyConfirmObj({ productId: item.product_id, newQty })
     } else {
+      if (stock < 1) { toast.warning('მარაგი ამოიწურა'); return }
       setCartItems(prev => [...prev, item])
     }
   }, [])
@@ -44,8 +56,12 @@ export default function POSPage() {
       
       const existing = cartItemsRef.current.find(i => i.product_id === product.id)
       if (existing) {
-        setQtyConfirmObj({ productId: product.id, newQty: existing.quantity + 1 })
-        // We can optionally sound a different beep or toast, but the dialog will handle the rest
+        const newQty = existing.quantity + 1
+        if (newQty > stockOf(product.id)) {
+          toast.warning(`${product.name} — მხოლოდ ${stockOf(product.id)} ცალია მარაგში`)
+          return
+        }
+        setQtyConfirmObj({ productId: product.id, newQty })
       } else {
         addToCart({
           product_id: product.id,
@@ -62,13 +78,22 @@ export default function POSPage() {
 
   // updateCart handles + - buttons and manual qty input
   const updateCart = useCallback((productId: string, qty: number) => {
-    const existing = cartItemsRef.current.find(i => i.product_id === productId)
-    if (existing && qty > existing.quantity) {
-      // Trying to increase quantity
-      setQtyConfirmObj({ productId, newQty: qty })
-    } else if (qty <= 0) {
+    if (qty <= 0) {
       // Removing item
       setCartItems(prev => prev.filter(i => i.product_id !== productId))
+      return
+    }
+    const stock = stockOf(productId)
+    if (qty > stock) {
+      // Never let cart quantity exceed available stock — clamp and warn.
+      toast.warning(`მხოლოდ ${stock} ცალია მარაგში`)
+      setCartItems(prev => prev.map(i => i.product_id === productId ? { ...i, quantity: stock } : i))
+      return
+    }
+    const existing = cartItemsRef.current.find(i => i.product_id === productId)
+    if (existing && qty > existing.quantity) {
+      // Trying to increase quantity — confirm
+      setQtyConfirmObj({ productId, newQty: qty })
     } else {
       // Decreasing quantity or typing the exact same
       setCartItems(prev => prev.map(i => i.product_id === productId ? { ...i, quantity: qty } : i))
@@ -81,10 +106,14 @@ export default function POSPage() {
 
   const clearCart = useCallback(() => setCartItems([]), [])
 
+  // Resume a held cart: replace the current cart with the saved items.
+  const resumeCart = useCallback((heldItems: CartItem[]) => setCartItems(heldItems), [])
+
   const handleConfirmIncrement = () => {
     if (qtyConfirmObj) {
       const { productId, newQty } = qtyConfirmObj
-      setCartItems(prev => prev.map(i => i.product_id === productId ? { ...i, quantity: newQty } : i))
+      const capped = Math.min(newQty, stockOf(productId)) // never exceed stock
+      setCartItems(prev => prev.map(i => i.product_id === productId ? { ...i, quantity: capped } : i))
       setQtyConfirmObj(null)
     }
   }
@@ -108,6 +137,7 @@ export default function POSPage() {
           onUpdate={updateCart}
           onRemove={removeFromCart}
           onClear={clearCart}
+          onResume={resumeCart}
           className="h-full"
         />
       </div>
@@ -137,6 +167,7 @@ export default function POSPage() {
                  onUpdate={updateCart}
                  onRemove={removeFromCart}
                  onClear={clearCart}
+                 onResume={resumeCart}
                  className="h-full w-full border border-border/50 rounded-3xl shadow-[0_-8px_30px_-10px_rgba(0,0,0,0.1)]"
                />
             </div>

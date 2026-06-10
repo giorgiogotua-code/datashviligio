@@ -27,7 +27,8 @@ export type SaleType = 'sale' | 'return'
 
 export type Sale = {
   id: string
-  total: number
+  total: number               // net total (after discount)
+  discount?: number           // discount amount applied
   payment_method: 'cash' | 'card'
   items_count: number
   created_at: string
@@ -55,4 +56,29 @@ export type SaleItem = {
 /** Signed money value of a sale row: returns count as negative against revenue. */
 export function saleAmount(s: Pick<Sale, 'type' | 'total'>): number {
   return s.type === 'return' ? -s.total : s.total
+}
+
+export type DiscountType = 'amount' | 'percent'
+
+/** A single line item inside a held (parked) cart. Mirrors the POS CartItem shape. */
+export type HeldCartItem = {
+  product_id: string
+  product_name: string
+  barcode: string | null
+  unit_price: number
+  quantity: number
+  photo_url: string | null
+}
+
+/** A parked cart saved to Supabase so it survives refresh / other devices. */
+export type HeldCart = {
+  id: string
+  label: string | null
+  items: HeldCartItem[]
+  discount: number              // computed discount amount
+  discount_type: DiscountType | null
+  discount_value: number        // raw value the cashier typed (₾ or %)
+  total: number                 // final total snapshot (after discount)
+  items_count: number
+  created_at: string
 }

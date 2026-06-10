@@ -9,6 +9,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean slate (so the file can be re-run without errors)
 DROP TABLE IF EXISTS fiscal_reports CASCADE;
+DROP TABLE IF EXISTS held_carts CASCADE;
 DROP TABLE IF EXISTS sale_items CASCADE;
 DROP TABLE IF EXISTS sales CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
@@ -50,6 +51,7 @@ CREATE INDEX idx_products_barcode  ON products(barcode);
 CREATE TABLE sales (
   id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   total          DECIMAL(10, 2) NOT NULL,
+  discount       DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- discount amount applied (total is already net)
   payment_method TEXT CHECK (payment_method IN ('cash', 'card')) NOT NULL,
   items_count    INTEGER NOT NULL DEFAULT 0,
   type           TEXT NOT NULL DEFAULT 'sale' CHECK (type IN ('sale','return')),
@@ -88,6 +90,22 @@ CREATE TABLE settings (
   value TEXT NOT NULL DEFAULT ''
 );
 
+-- ============================================================
+--  HELD CARTS (parked sales waiting at the counter)
+-- ============================================================
+CREATE TABLE held_carts (
+  id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  label          TEXT,                                  -- optional note / customer name
+  items          JSONB NOT NULL DEFAULT '[]',           -- cart line items
+  discount       DECIMAL(10, 2) NOT NULL DEFAULT 0,     -- computed discount amount
+  discount_type  TEXT CHECK (discount_type IN ('amount','percent')),
+  discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0,     -- raw value the cashier typed (₾ or %)
+  total          DECIMAL(10, 2) NOT NULL DEFAULT 0,     -- final total snapshot (after discount)
+  items_count    INTEGER NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_held_carts_created ON held_carts(created_at);
+
 INSERT INTO settings (key, value) VALUES
   ('companyName', 'AccessoryShop'),
   ('companyId',   ''),
@@ -116,6 +134,7 @@ ALTER TABLE products       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sale_items     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE held_carts     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fiscal_reports ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "authenticated full access" ON categories     FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -123,6 +142,7 @@ CREATE POLICY "authenticated full access" ON products       FOR ALL TO authentic
 CREATE POLICY "authenticated full access" ON sales          FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON sale_items     FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON settings       FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON held_carts     FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON fiscal_reports FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ============================================================
@@ -138,38 +158,52 @@ CREATE OR REPLACE FUNCTION create_sale(
   p_is_fiscal      BOOLEAN,
   p_items          JSONB,
   p_type           TEXT DEFAULT 'sale',
-  p_reversal_of    UUID DEFAULT NULL
+  p_reversal_of    UUID DEFAULT NULL,
+  p_discount       NUMERIC DEFAULT 0
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
 AS $$
 DECLARE
-  v_sale sales;
-  v_item JSONB;
-  v_dir  INTEGER := CASE WHEN p_type = 'return' THEN 1 ELSE -1 END;
+  v_sale  sales;
+  v_item  JSONB;
+  v_dir   INTEGER := CASE WHEN p_type = 'return' THEN 1 ELSE -1 END;
+  v_pid   UUID;
+  v_qty   INTEGER;
+  v_avail INTEGER;
 BEGIN
-  INSERT INTO sales(total, payment_method, items_count, is_fiscal, fiscal_status, type, reversal_of)
-  VALUES (p_total, p_payment_method, p_items_count, p_is_fiscal,
+  INSERT INTO sales(total, discount, payment_method, items_count, is_fiscal, fiscal_status, type, reversal_of)
+  VALUES (p_total, COALESCE(p_discount, 0), p_payment_method, p_items_count, p_is_fiscal,
           CASE WHEN p_is_fiscal THEN 'pending' ELSE 'none' END, p_type, p_reversal_of)
   RETURNING * INTO v_sale;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
+    v_pid := NULLIF(v_item->>'product_id','')::uuid;
+    v_qty := (v_item->>'quantity')::int;
+
     INSERT INTO sale_items(sale_id, product_id, product_name, barcode, quantity, unit_price, total_price)
     VALUES (
-      v_sale.id,
-      NULLIF(v_item->>'product_id','')::uuid,
+      v_sale.id, v_pid,
       v_item->>'product_name',
       v_item->>'barcode',
-      (v_item->>'quantity')::int,
+      v_qty,
       (v_item->>'unit_price')::numeric,
       (v_item->>'total_price')::numeric
     );
 
-    IF NULLIF(v_item->>'product_id','') IS NOT NULL THEN
+    IF v_pid IS NOT NULL THEN
+      -- Lock the product row so concurrent sales can't both oversell.
+      SELECT quantity INTO v_avail FROM products WHERE id = v_pid FOR UPDATE;
+
+      IF p_type = 'sale' AND v_avail IS NOT NULL AND v_avail < v_qty THEN
+        RAISE EXCEPTION 'INSUFFICIENT_STOCK:%:%', COALESCE(v_item->>'product_name','?'), v_avail
+          USING ERRCODE = 'P0001';
+      END IF;
+
       UPDATE products
-        SET quantity = GREATEST(0, quantity + v_dir * (v_item->>'quantity')::int)
-        WHERE id = (v_item->>'product_id')::uuid;
+        SET quantity = GREATEST(0, quantity + v_dir * v_qty)
+        WHERE id = v_pid;
     END IF;
   END LOOP;
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
-import { ShoppingCart, Trash2, Plus, Minus, X, CreditCard, Banknote, CheckCircle, Printer, Sparkles, ReceiptText } from 'lucide-react'
+import { ShoppingCart, Trash2, Plus, Minus, X, CreditCard, Banknote, CheckCircle, Printer, Sparkles, ReceiptText, Percent, Pause, RotateCcw, Clock, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
@@ -25,6 +25,7 @@ interface Props {
   onUpdate: (id: string, qty: number) => void
   onRemove: (id: string) => void
   onClear: () => void
+  onResume?: (items: CartItem[]) => void
   className?: string
 }
 
@@ -32,20 +33,28 @@ function formatDate(d: Date) {
   return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
-export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Props) {
-  const { addSale, updateSaleFiscal } = useStore()
+export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, className }: Props) {
+  const { addSale, updateSaleFiscal, heldCarts, holdCart, deleteHeldCart } = useStore()
   const [method, setMethod] = useState<'cash' | 'card'>('cash')
   const [fiscalEnabled, setFiscalEnabled] = useState(true)
   const [isSelling, setIsSelling] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [clearOpen, setClearOpen]     = useState(false)
   const [receiptOpen, setReceiptOpen] = useState(false)
-  const [lastSale, setLastSale]       = useState<{ items: CartItem[]; total: number; method: string; date: Date; fiscalId?: string | null; fiscalFailed?: boolean } | null>(null)
+  const [heldOpen, setHeldOpen]       = useState(false)
+  const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount')
+  const [discountValue, setDiscountValue] = useState('')
+  const [lastSale, setLastSale]       = useState<{ items: CartItem[]; subtotal: number; discount: number; total: number; method: string; date: Date; fiscalId?: string | null; fiscalFailed?: boolean } | null>(null)
   const [cartBounce, setCartBounce]   = useState(false)
   const prevCount = useRef(items.length)
 
-  const total = items.reduce((s, i) => s + i.unit_price * i.quantity, 0)
+  const subtotal = items.reduce((s, i) => s + i.unit_price * i.quantity, 0)
   const count = items.reduce((s, i) => s + i.quantity, 0)
+  const rawDiscount = Math.max(0, parseFloat(discountValue) || 0)
+  const discountAmount = discountType === 'percent'
+    ? Math.min(subtotal, subtotal * rawDiscount / 100)
+    : Math.min(subtotal, rawDiscount)
+  const total = Math.max(0, subtotal - discountAmount)
 
   // Bounce icon when item added
   useEffect(() => {
@@ -63,7 +72,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
     const soldItems = [...items]
     try {
       const sale = await addSale(
-        { total, payment_method: method, items_count: count, is_fiscal: fiscalEnabled },
+        { total, discount: discountAmount, payment_method: method, items_count: count, is_fiscal: fiscalEnabled },
         soldItems.map(i => ({
           product_id: i.product_id, product_name: i.product_name, barcode: i.barcode,
           quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity,
@@ -71,8 +80,8 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
       )
       if (!sale) return // store already surfaced the error
 
-      setLastSale({ items: soldItems, total, method: method === 'cash' ? 'ნაღდი' : 'ბარათი', date: now })
-      setConfirmOpen(false); onClear()
+      setLastSale({ items: soldItems, subtotal, discount: discountAmount, total, method: method === 'cash' ? 'ნაღდი' : 'ბარათი', date: now })
+      setConfirmOpen(false); onClear(); setDiscountValue('')
       toast.success('გაყიდვა წარმატებით დასრულდა!')
       setReceiptOpen(true)
 
@@ -102,6 +111,33 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
     } finally {
       setIsSelling(false)
     }
+  }
+
+  const handleHold = async () => {
+    if (items.length === 0) return
+    await holdCart({
+      label: null,
+      items: items.map(i => ({
+        product_id: i.product_id, product_name: i.product_name, barcode: i.barcode,
+        unit_price: i.unit_price, quantity: i.quantity, photo_url: i.photo_url,
+      })),
+      discount: discountAmount,
+      discount_type: rawDiscount > 0 ? discountType : null,
+      discount_value: rawDiscount,
+      total,
+      items_count: count,
+    })
+    toast.success('კალათა გადადებულია')
+    onClear(); setDiscountValue('')
+  }
+
+  const handleResume = (cart: typeof heldCarts[number]) => {
+    onResume?.(cart.items as CartItem[])
+    setDiscountType(cart.discount_type ?? 'amount')
+    setDiscountValue(cart.discount_value ? String(cart.discount_value) : '')
+    deleteHeldCart(cart.id)
+    setHeldOpen(false)
+    toast.success('კალათა დაბრუნდა')
   }
 
   return (
@@ -177,12 +213,59 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
       {/* Footer */}
       <div className="border-t border-border p-4 flex flex-col gap-3">
 
+        {/* Discount control */}
+        <div className="flex items-center gap-2">
+          <div className="flex bg-muted/50 p-0.5 rounded-xl border border-border shrink-0">
+            <button
+              onClick={() => setDiscountType('amount')}
+              className={cn('size-8 rounded-lg flex items-center justify-center text-sm font-bold transition-all',
+                discountType === 'amount' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground')}
+              title="ფიქსირებული თანხა"
+            >₾</button>
+            <button
+              onClick={() => setDiscountType('percent')}
+              className={cn('size-8 rounded-lg flex items-center justify-center transition-all',
+                discountType === 'percent' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground')}
+              title="პროცენტი"
+            ><Percent className="size-3.5" /></button>
+          </div>
+          <div className="relative flex-1">
+            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <input
+              type="number" min="0" inputMode="decimal"
+              value={discountValue}
+              onChange={e => setDiscountValue(e.target.value)}
+              placeholder={discountType === 'percent' ? 'ფასდაკლება %' : 'ფასდაკლება ₾'}
+              className="w-full h-9 pl-9 pr-3 text-sm bg-white border border-border rounded-xl outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+            />
+          </div>
+          {discountAmount > 0 && (
+            <button onClick={() => setDiscountValue('')} className="size-8 rounded-lg hover:bg-red-50 hover:text-red-500 text-muted-foreground flex items-center justify-center transition-all shrink-0" title="ფასდაკლების მოხსნა">
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+
         {/* Totals */}
         <div className="flex flex-col gap-1.5 bg-muted/30 rounded-2xl px-4 py-3">
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">პოზიციები:</span>
             <span className="font-semibold text-foreground">{count}</span>
           </div>
+          {discountAmount > 0 && (
+            <>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">ქვეჯამი:</span>
+                <span className="font-semibold text-foreground tabular-nums">₾{subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-emerald-600 font-medium flex items-center gap-1">
+                  <Tag className="size-3" /> ფასდაკლება{discountType === 'percent' ? ` (${rawDiscount}%)` : ''}:
+                </span>
+                <span className="font-bold text-emerald-600 tabular-nums">−₾{discountAmount.toFixed(2)}</span>
+              </div>
+            </>
+          )}
           <Separator className="opacity-50" />
           <div className="flex justify-between items-center">
             <span className="text-sm font-semibold text-foreground">სულ:</span>
@@ -233,20 +316,48 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
           </span>
         </button>
 
-        {/* Sell button */}
-        <button
-          disabled={items.length === 0 || isSelling}
-          onClick={() => setConfirmOpen(true)}
-          className={cn(
-            'w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 transition-all duration-200',
-            items.length === 0 || isSelling
-              ? 'bg-muted text-muted-foreground cursor-not-allowed'
-              : 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white shadow-xl shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:-translate-y-0.5 active:translate-y-0'
-          )}
-        >
-          <Sparkles className="size-4" />
-          გაყიდვა — ₾{total.toFixed(2)}
-        </button>
+        {/* Held carts access */}
+        {heldCarts.length > 0 && (
+          <button
+            onClick={() => setHeldOpen(true)}
+            className="flex items-center gap-2.5 w-full px-4 py-2.5 rounded-2xl border border-amber-200 bg-amber-50/60 hover:bg-amber-50 transition-colors"
+          >
+            <Clock className="size-4 text-amber-600 shrink-0" />
+            <span className="text-sm font-bold text-amber-700 flex-1 text-left">გადადებული კალათები</span>
+            <span className="text-[11px] font-black px-2 py-0.5 rounded-lg bg-amber-500 text-white">{heldCarts.length}</span>
+          </button>
+        )}
+
+        {/* Hold + Sell */}
+        <div className="flex gap-2">
+          <button
+            disabled={items.length === 0 || isSelling}
+            onClick={handleHold}
+            title="კალათის გადადება"
+            className={cn(
+              'shrink-0 px-4 py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 transition-all duration-200 border-2',
+              items.length === 0 || isSelling
+                ? 'border-border bg-muted text-muted-foreground cursor-not-allowed'
+                : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95'
+            )}
+          >
+            <Pause className="size-4" />
+            <span className="hidden sm:inline">გადადება</span>
+          </button>
+          <button
+            disabled={items.length === 0 || isSelling}
+            onClick={() => setConfirmOpen(true)}
+            className={cn(
+              'flex-1 py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 transition-all duration-200',
+              items.length === 0 || isSelling
+                ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                : 'bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white shadow-xl shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:-translate-y-0.5 active:translate-y-0'
+            )}
+          >
+            <Sparkles className="size-4" />
+            გაყიდვა — ₾{total.toFixed(2)}
+          </button>
+        </div>
       </div>
 
       {/* Confirm sale dialog */}
@@ -285,6 +396,48 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Held carts dialog */}
+      <Dialog open={heldOpen} onOpenChange={setHeldOpen}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="size-5 text-amber-500" /> გადადებული კალათები
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto py-1">
+            {heldCarts.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">გადადებული კალათა არ არის</p>
+            ) : heldCarts.map(cart => (
+              <div key={cart.id} className="flex items-center gap-3 bg-muted/40 rounded-2xl p-3">
+                <div className="size-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                  <ShoppingCart className="size-4 text-amber-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-foreground">₾{cart.total.toFixed(2)} <span className="text-xs font-normal text-muted-foreground">· {cart.items_count} პოზიცია</span></p>
+                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Clock className="size-3" /> {formatDate(new Date(cart.created_at))}
+                    {cart.discount > 0 && <span className="text-emerald-600 font-semibold ml-1">−₾{cart.discount.toFixed(2)}</span>}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleResume(cart)}
+                  className="flex items-center gap-1.5 px-3 h-9 rounded-xl bg-gradient-to-r from-primary to-indigo-600 text-white text-xs font-bold shadow-md shadow-primary/25 hover:scale-105 transition-transform shrink-0"
+                >
+                  <RotateCcw className="size-3.5" /> დაბრუნება
+                </button>
+                <button
+                  onClick={() => deleteHeldCart(cart.id)}
+                  className="size-9 rounded-xl hover:bg-red-50 hover:text-red-500 text-muted-foreground flex items-center justify-center transition-all shrink-0"
+                  title="წაშლა"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Receipt */}
       {lastSale && (
         <Dialog open={receiptOpen} onOpenChange={setReceiptOpen}>
@@ -309,6 +462,16 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
                 ))}
               </div>
               <Separator />
+              {lastSale.discount > 0 && (
+                <>
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>ქვეჯამი:</span><span className="tabular-nums">₾{lastSale.subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-emerald-600 font-semibold">
+                    <span>ფასდაკლება:</span><span className="tabular-nums">−₾{lastSale.discount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between font-black text-base">
                 <span>სულ:</span>
                 <span className="text-primary">₾{lastSale.total.toFixed(2)}</span>
