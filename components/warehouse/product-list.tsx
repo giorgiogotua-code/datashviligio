@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { useStore } from '@/lib/store'
 import { ProductDialog } from './product-dialog'
+import { ImportDialog } from './import-dialog'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import type { Product } from '@/lib/mock-data'
@@ -24,7 +25,7 @@ function StockBadge({ qty }: { qty: number }) {
 }
 
 export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { selectedCategoryId: string | null; onOpenMobileCategories?: () => void }) {
-  const { products, categories, deleteProduct, importProducts } = useStore()
+  const { products, categories, deleteProduct } = useStore()
   const [search, setSearch] = useState('')
   const [barcodeInput, setBarcodeInput] = useState('')
   const [page, setPage] = useState(1)
@@ -34,6 +35,7 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
   const [focusQuantity, setFocusQuantity] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
   const barcodeRef = useRef<HTMLInputElement>(null)
 
   const getCatName = (id: string) => categories.find(c => c.id === id)?.name ?? '—'
@@ -83,8 +85,6 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
   const openAdd  = () => { setEditProduct(null); setPrefillBarcode(''); setFocusQuantity(false); setDialogOpen(true) }
   const openEdit = (p: Product) => { setEditProduct(p); setPrefillBarcode(''); setFocusQuantity(false); setDialogOpen(true) }
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([{
       'სახელი': '',
@@ -93,6 +93,7 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
       'შესყიდვის ფასი': 0,
       'გაყიდვის ფასი': 0,
       'რაოდენობა': 0,
+      'ფოტოს ფაილი': '',
       'ფოტოს ბმული (URL)': ''
     }])
     const wb = XLSX.utils.book_new()
@@ -108,68 +109,13 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
       'შესყიდვის ფასი': p.purchase_price,
       'გაყიდვის ფასი': p.sale_price,
       'რაოდენობა': p.quantity,
+      'ფოტოს ფაილი': '',
       'ფოტოს ბმული (URL)': p.photo_url || ''
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Products")
     XLSX.writeFile(wb, "products_export.xlsx")
-  }
-
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result
-        const wb = XLSX.read(bstr, { type: 'binary' })
-        const wsname = wb.SheetNames[0]
-        const ws = wb.Sheets[wsname]
-        const data = XLSX.utils.sheet_to_json<any>(ws)
-
-        const newProducts: Omit<Product, 'id' | 'created_at'>[] = []
-        let failCount = 0
-
-        for (const row of data) {
-          const name = row['სახელი']
-          if (!name) { failCount++; continue }
-
-          const catName = row['კატეგორია']
-          let catId = categories[0]?.id || ''
-          if (catName) {
-            const foundCat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase())
-            if (foundCat) catId = foundCat.id
-          }
-
-          newProducts.push({
-            name,
-            barcode: row['შტრიხკოდი'] ? String(row['შტრიხკოდი']) : null,
-            category_id: catId,
-            purchase_price: parseFloat(row['შესყიდვის ფასი']) || 0,
-            sale_price: parseFloat(row['გაყიდვის ფასი']) || 0,
-            quantity: parseInt(row['რაოდენობა']) || 0,
-            photo_url: row['ფოტოს ბმული (URL)'] || null
-          })
-        }
-
-        if (newProducts.length > 0) {
-          importProducts(newProducts)
-          toast.success(`${newProducts.length} პროდუქტი წარმატებით დაიმპორტდა.`)
-        }
-        if (failCount > 0) {
-          toast.warning(`${failCount} ჩანაწერი გამოტოვებულია (სახელის გარეშე).`)
-        }
-      } catch (err) {
-        console.error(err)
-        toast.error('ფაილის წაკითხვა ვერ მოხერხდა.')
-      }
-      
-      // reset input
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-    reader.readAsBinaryString(file)
   }
 
   return (
@@ -207,10 +153,9 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
              <Button variant="ghost" size="sm" onClick={handleExport} title="ექსპორტი" className="h-8 rounded-lg px-2 text-muted-foreground hover:text-foreground">
                <FileDown className="size-4" />
              </Button>
-             <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} title="იმპორტი" className="h-8 rounded-lg px-2 text-muted-foreground hover:text-foreground">
+             <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)} title="იმპორტი (Excel + ფოტოები)" className="h-8 rounded-lg px-2 text-muted-foreground hover:text-foreground">
                <FileUp className="size-4" />
              </Button>
-             <input type="file" accept=".xlsx, .xls" hidden ref={fileInputRef} onChange={handleImport} />
           </div>
 
           <Button onClick={openAdd} size="sm" className="h-9 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-600/90 shadow-md shadow-primary/25 border-0 text-sm">
@@ -318,6 +263,8 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
       </div>
 
       <ProductDialog open={dialogOpen} onClose={() => { setDialogOpen(false); setFocusQuantity(false) }} product={editProduct} prefillBarcode={prefillBarcode} autoFocusQuantity={focusQuantity} />
+
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
 
       <AlertDialog open={!!deleteId} onOpenChange={v => !v && setDeleteId(null)}>
         <AlertDialogContent className="rounded-2xl">
