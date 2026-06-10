@@ -725,7 +725,12 @@ export const useStore = create<StoreState>()(
           .insert({ name: c.name, pin: c.pin })
           .select()
           .single()
-        if (failed(error, 'კასირის დამატება ვერ მოხერხდა') || !data) return null
+        if (error) {
+          if ((error as { code?: string }).code === '23505') toast.error('ეს PIN უკვე გამოიყენება სხვა აქტიურ კასირზე')
+          else failed(error, 'კასირის დამატება ვერ მოხერხდა')
+          return null
+        }
+        if (!data) return null
         const cash = mapCashier(data)
         set((state) => ({ cashiers: [...state.cashiers, cash] }))
         return cash
@@ -733,7 +738,11 @@ export const useStore = create<StoreState>()(
 
       updateCashier: async (id, c) => {
         const { error } = await supabase.from('cashiers').update(c).eq('id', id)
-        if (failed(error, 'კასირის განახლება ვერ მოხერხდა')) return
+        if (error) {
+          if ((error as { code?: string }).code === '23505') toast.error('ეს PIN უკვე გამოიყენება სხვა აქტიურ კასირზე')
+          else failed(error, 'კასირის განახლება ვერ მოხერხდა')
+          return
+        }
         set((state) => ({ cashiers: state.cashiers.map((x) => (x.id === id ? { ...x, ...c } : x)) }))
       },
 

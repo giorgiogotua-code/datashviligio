@@ -75,6 +75,8 @@ CREATE TABLE cashiers (
   active     BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- PIN identifies the cashier at shift open → unique among active cashiers.
+CREATE UNIQUE INDEX idx_cashiers_pin_active ON cashiers(pin) WHERE active;
 
 CREATE TABLE shifts (
   id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,

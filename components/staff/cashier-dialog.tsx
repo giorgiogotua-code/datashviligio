@@ -29,8 +29,8 @@ export function CashierDialog({ open, onClose, cashier }: Props) {
   const handleSave = async () => {
     if (!name.trim()) { toast.error('სახელი სავალდებულოა'); return }
     if (!/^\d{4}$/.test(pin)) { toast.error('PIN უნდა იყოს 4 ციფრი'); return }
-    // PIN must be unique among other cashiers
-    const clash = cashiers.find(c => c.pin === pin && c.id !== cashier?.id)
+    // PIN must be unique among other ACTIVE cashiers (matches the DB index)
+    const clash = cashiers.find(c => c.pin === pin && c.active && c.id !== cashier?.id)
     if (clash) { toast.error(`ეს PIN უკვე იყენებს — ${clash.name}`); return }
 
     setSaving(true)
