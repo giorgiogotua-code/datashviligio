@@ -562,6 +562,9 @@ export const useStore = create<StoreState>()(
           p_items: items,
           p_type: 'return',
           p_reversal_of: original.id,
+          // A return of a credit sale lowers that customer's debt.
+          p_customer_id: original.customer_id ?? null,
+          p_customer_name: original.customer_name ?? null,
           p_shift_id: openShiftRow?.id ?? null,
           p_cashier_id: openShiftRow?.cashier_id ?? null,
           p_cashier_name: openShiftRow?.cashier_name ?? null,
@@ -578,6 +581,10 @@ export const useStore = create<StoreState>()(
             const ret = items.find((i) => i.product_id === p.id)
             return ret ? { ...p, quantity: p.quantity + ret.quantity } : p
           }),
+          // Mirror the debt reduction locally for credit-sale returns.
+          customers: original.customer_id
+            ? state.customers.map((c) => (c.id === original.customer_id ? { ...c, balance: c.balance - total } : c))
+            : state.customers,
         }))
         return newReturn
       },

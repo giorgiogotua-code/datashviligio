@@ -358,9 +358,14 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Unpaid remainder of a credit sale becomes the customer's debt.
-  IF p_customer_id IS NOT NULL AND p_type = 'sale' THEN
-    UPDATE customers SET balance = balance + (p_total - v_paid) WHERE id = p_customer_id;
+  -- Customer balance: a credit sale adds the unpaid remainder to the debt;
+  -- a return of a customer-linked sale lowers the debt by the returned amount.
+  IF p_customer_id IS NOT NULL THEN
+    IF p_type = 'return' THEN
+      UPDATE customers SET balance = balance - p_total WHERE id = p_customer_id;
+    ELSE
+      UPDATE customers SET balance = balance + (p_total - v_paid) WHERE id = p_customer_id;
+    END IF;
   END IF;
 
   RETURN jsonb_build_object(
