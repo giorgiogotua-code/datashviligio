@@ -88,14 +88,16 @@ export function KpiCards({ sales, saleItems, products, purchases }: Props) {
   const expense = purchases.reduce((s, p) => s + p.total, 0)
 
   // Real profit = revenue − cost of goods sold (COGS).
-  // COGS uses each sold product's current purchase_price (best estimate).
+  // Use the cost captured at sale time; fall back to the product's current
+  // cost for older sales recorded before that was stored.
   const costOf = (id: string | null) => (id ? products.find(p => p.id === id)?.purchase_price ?? 0 : 0)
   const saleType = new Map(sales.map(s => [s.id, s.type]))
   const cogs = saleItems.reduce((s, it) => {
     const t = saleType.get(it.sale_id)
     if (!t) return s // item not in the current period
     const dir = t === 'return' ? -1 : 1
-    return s + dir * costOf(it.product_id) * it.quantity
+    const cost = it.unit_cost || costOf(it.product_id)
+    return s + dir * cost * it.quantity
   }, 0)
   const profit = total - cogs
 

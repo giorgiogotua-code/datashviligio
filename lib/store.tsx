@@ -59,7 +59,7 @@ export interface StoreState {
   deleteProduct: (id: string) => Promise<void>
   addSale: (
     sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'> & { discount?: number },
-    items: Omit<SaleItem, 'id' | 'sale_id'>[]
+    items: Omit<SaleItem, 'id' | 'sale_id' | 'unit_cost'>[]
   ) => Promise<Sale | null>
   // Held (parked) carts — persisted in Supabase so they survive refresh.
   holdCart: (cart: {
@@ -83,7 +83,7 @@ export interface StoreState {
   paySupplier: (supplierId: string, amount: number, note?: string | null) => Promise<void>
   addReturn: (
     original: Sale,
-    items: Omit<SaleItem, 'id' | 'sale_id'>[]
+    items: Omit<SaleItem, 'id' | 'sale_id' | 'unit_cost'>[]
   ) => Promise<Sale | null>
   updateSaleFiscal: (
     saleId: string,
@@ -206,6 +206,7 @@ function mapSaleItem(r: any): SaleItem {
     quantity: num(r.quantity),
     unit_price: num(r.unit_price),
     total_price: num(r.total_price),
+    unit_cost: num(r.unit_cost),
   }
 }
 

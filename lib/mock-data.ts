@@ -51,6 +51,7 @@ export type SaleItem = {
   quantity: number
   unit_price: number
   total_price: number
+  unit_cost: number   // product cost at sale time (for real margin); server-computed
 }
 
 /** Signed money value of a sale row: returns count as negative against revenue. */

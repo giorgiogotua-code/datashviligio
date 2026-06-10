@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { KpiCards } from '@/components/accounting/kpi-cards'
+import { TotalsCards } from '@/components/accounting/totals-cards'
 import { SalesChart } from '@/components/accounting/sales-chart'
 import { SalesHistory } from '@/components/accounting/sales-history'
 import { InventoryTab } from '@/components/accounting/inventory-tab'
@@ -123,6 +124,9 @@ export default function AccountingPage() {
               </div>
             ))}
           </div>
+
+          {/* All-time business snapshot (not period-filtered) */}
+          <TotalsCards />
         </div>
       )}
 
