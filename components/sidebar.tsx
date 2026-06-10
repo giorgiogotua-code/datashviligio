@@ -21,13 +21,13 @@ function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, 
 
   return (
     <aside className={cn(
-      "h-full flex flex-col bg-white overflow-hidden transition-all duration-300",
+      "h-full flex flex-col bg-transparent overflow-hidden transition-all duration-300",
       collapsed ? "w-20" : "w-64"
     )}>
 
       {/* Logo area */}
-      <div className={cn("pt-6 pb-5 flex items-center h-20", collapsed ? "px-5 justify-center flex-col gap-2" : "px-5")}>
-        <div className="flex items-center gap-3 w-full">
+      <div className={cn("pt-6 pb-5 flex items-center", collapsed ? "px-5 justify-center flex-col gap-4 h-auto" : "px-5 h-20")}>
+        <div className={cn("flex items-center w-full", collapsed ? "justify-center" : "gap-3")}>
           <div className="size-10 rounded-2xl bg-gradient-to-br from-primary to-indigo-700 flex items-center justify-center shadow-lg shadow-primary/30 shrink-0">
             <Smartphone className="size-5 text-white" />
           </div>
@@ -41,7 +41,7 @@ function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, 
           )}
           
           {/* Close button — mobile only */}
-          {onClose && (
+          {onClose && !collapsed && (
             <button
               onClick={onClose}
               className="md:hidden size-8 rounded-xl border border-border flex items-center justify-center text-muted-foreground hover:bg-accent transition-colors shrink-0 ml-auto"
@@ -52,9 +52,9 @@ function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, 
           )}
 
           {/* Desktop collapse toggle */}
-          {!onClose && (
+          {!onClose && !collapsed && (
              <button
-                onClick={() => setDesktopSidebarCollapsed(!collapsed)}
+                onClick={() => setDesktopSidebarCollapsed(true)}
                 className="hidden md:flex size-8 rounded-xl bg-muted/50 hover:bg-muted text-muted-foreground items-center justify-center transition-colors ml-auto shrink-0"
                 aria-label="მენიუს შეკვეცა"
              >
@@ -62,6 +62,17 @@ function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, 
              </button>
           )}
         </div>
+
+        {/* Desktop collapse toggle (Collapsed Mode) */}
+        {!onClose && collapsed && (
+           <button
+              onClick={() => setDesktopSidebarCollapsed(false)}
+              className="hidden md:flex size-8 rounded-xl bg-muted/50 hover:bg-muted text-muted-foreground items-center justify-center transition-colors shrink-0"
+              aria-label="მენიუს გაშლა"
+           >
+              <Menu className="size-4" />
+           </button>
+        )}
       </div>
 
       {/* Live badge */}
@@ -164,7 +175,7 @@ export function Sidebar() {
   return (
     <>
       {/* Desktop — always visible */}
-      <div className={cn("hidden md:flex shrink-0 border-r border-border h-screen sticky top-0 transition-all duration-300", isDesktopSidebarCollapsed ? "w-20" : "w-64")}>
+      <div className={cn("hidden md:flex shrink-0 floating-panel rounded-3xl h-full transition-all duration-300", isDesktopSidebarCollapsed ? "w-20" : "w-64")}>
         <SidebarContent collapsed={isDesktopSidebarCollapsed} />
       </div>
 

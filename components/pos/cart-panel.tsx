@@ -105,7 +105,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, className }: Pro
   }
 
   return (
-    <aside className={cn("w-full lg:w-96 shrink-0 bg-white rounded-2xl flex flex-col overflow-hidden animate-fade-up border border-border shadow-sm", className)}>
+    <aside className={cn("w-full lg:w-96 shrink-0 glass rounded-[24px] flex flex-col overflow-hidden animate-slide-right", className)}>
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-border bg-gradient-to-r from-muted/40 to-transparent">

@@ -42,7 +42,7 @@ export function TopHeader() {
   }, [])
 
   return (
-    <header className="h-16 border-b border-border bg-white/90 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between px-4 md:px-6 gap-3 md:gap-4">
+    <header className="h-16 floating-panel rounded-3xl shrink-0 z-20 flex items-center justify-between px-4 md:px-6 gap-3 md:gap-4">
 
       {/* Left: hamburger (mobile) + module title */}
       <div className="flex items-center gap-3">

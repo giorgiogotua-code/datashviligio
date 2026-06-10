@@ -133,7 +133,7 @@ export function ProductGrid({ onAddToCart }: Props) {
                   disabled={outOfStock}
                   onClick={() => handleAdd(product)}
                   className={cn(
-                    'product-card group relative flex flex-col bg-white rounded-2xl border border-border overflow-hidden text-left',
+                    'product-card group relative flex flex-col bg-white rounded-[22px] overflow-hidden text-left animate-spring-in',
                     outOfStock ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer',
                     isFlash && 'ring-2 ring-primary/50 ring-offset-1'
                   )}
