@@ -1,14 +1,16 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
-import { ShoppingCart, Trash2, Plus, Minus, X, CreditCard, Banknote, CheckCircle, Printer, Sparkles, ReceiptText, Percent, Pause, RotateCcw, Clock, Tag } from 'lucide-react'
+import { ShoppingCart, Trash2, Plus, Minus, X, CreditCard, Banknote, CheckCircle, Printer, Sparkles, ReceiptText, Percent, Pause, RotateCcw, Clock, Tag, Users, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { issueFiscalReceipt, FiscalError } from '@/lib/fiscal'
+import { CustomerDialog } from '@/components/credit/customer-dialog'
 import { toast } from 'sonner'
 
 export interface CartItem {
@@ -34,8 +36,8 @@ function formatDate(d: Date) {
 }
 
 export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, className }: Props) {
-  const { addSale, updateSaleFiscal, heldCarts, holdCart, deleteHeldCart } = useStore()
-  const [method, setMethod] = useState<'cash' | 'card'>('cash')
+  const { addSale, updateSaleFiscal, heldCarts, holdCart, deleteHeldCart, customers } = useStore()
+  const [method, setMethod] = useState<'cash' | 'card' | 'credit'>('cash')
   const [fiscalEnabled, setFiscalEnabled] = useState(true)
   const [isSelling, setIsSelling] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -44,7 +46,11 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
   const [heldOpen, setHeldOpen]       = useState(false)
   const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount')
   const [discountValue, setDiscountValue] = useState('')
-  const [lastSale, setLastSale]       = useState<{ items: CartItem[]; subtotal: number; discount: number; total: number; method: string; date: Date; fiscalId?: string | null; fiscalFailed?: boolean } | null>(null)
+  // Credit (ნისია) state
+  const [customerId, setCustomerId] = useState('')
+  const [paidNow, setPaidNow] = useState('')
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false)
+  const [lastSale, setLastSale]       = useState<{ items: CartItem[]; subtotal: number; discount: number; total: number; method: string; date: Date; fiscalId?: string | null; fiscalFailed?: boolean; customerName?: string | null; paid?: number; debt?: number } | null>(null)
   const [cartBounce, setCartBounce]   = useState(false)
   const prevCount = useRef(items.length)
 
@@ -55,6 +61,12 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
     ? Math.min(subtotal, subtotal * rawDiscount / 100)
     : Math.min(subtotal, rawDiscount)
   const total = Math.max(0, subtotal - discountAmount)
+
+  // Credit derived values
+  const selectedCustomer = customers.find(c => c.id === customerId) ?? null
+  const paidNowValue = method === 'credit' ? Math.min(total, Math.max(0, parseFloat(paidNow) || 0)) : total
+  const creditDebt = method === 'credit' ? Math.max(0, total - paidNowValue) : 0
+  const methodLabel = method === 'cash' ? 'ნაღდი' : method === 'card' ? 'ბარათი' : 'ნისია'
 
   // Bounce icon when item added
   useEffect(() => {
@@ -72,7 +84,12 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
     const soldItems = [...items]
     try {
       const sale = await addSale(
-        { total, discount: discountAmount, payment_method: method, items_count: count, is_fiscal: fiscalEnabled },
+        {
+          total, discount: discountAmount, payment_method: method, items_count: count, is_fiscal: fiscalEnabled,
+          customer_id: method === 'credit' ? customerId : null,
+          customer_name: method === 'credit' ? (selectedCustomer?.name ?? null) : null,
+          paid: method === 'credit' ? paidNowValue : undefined,
+        },
         soldItems.map(i => ({
           product_id: i.product_id, product_name: i.product_name, barcode: i.barcode,
           quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity,
@@ -80,8 +97,14 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
       )
       if (!sale) return // store already surfaced the error
 
-      setLastSale({ items: soldItems, subtotal, discount: discountAmount, total, method: method === 'cash' ? 'ნაღდი' : 'ბარათი', date: now })
+      setLastSale({
+        items: soldItems, subtotal, discount: discountAmount, total, method: methodLabel, date: now,
+        customerName: method === 'credit' ? (selectedCustomer?.name ?? null) : null,
+        paid: method === 'credit' ? paidNowValue : undefined,
+        debt: method === 'credit' ? creditDebt : undefined,
+      })
       setConfirmOpen(false); onClear(); setDiscountValue('')
+      setMethod('cash'); setCustomerId(''); setPaidNow('')
       toast.success('გაყიდვა წარმატებით დასრულდა!')
       setReceiptOpen(true)
 
@@ -92,7 +115,7 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
           const result = await issueFiscalReceipt({
             saleId: sale.id,
             total,
-            paymentMethod: method,
+            paymentMethod: method === 'card' ? 'card' : 'cash',
             items: soldItems.map(i => ({
               name: i.product_name, quantity: i.quantity, unitPrice: i.unit_price,
               total: i.unit_price * i.quantity, barcode: i.barcode,
@@ -276,16 +299,17 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
         </div>
 
         {/* Payment method */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {[
-            { key: 'cash' as const, label: 'ნაღდი',  icon: Banknote,    gradient: 'from-emerald-500 to-teal-500' },
-            { key: 'card' as const, label: 'ბარათი', icon: CreditCard, gradient: 'from-blue-500 to-indigo-600' },
+            { key: 'cash'   as const, label: 'ნაღდი',  icon: Banknote,    gradient: 'from-emerald-500 to-teal-500' },
+            { key: 'card'   as const, label: 'ბარათი', icon: CreditCard, gradient: 'from-blue-500 to-indigo-600' },
+            { key: 'credit' as const, label: 'ნისია',  icon: Users,       gradient: 'from-amber-500 to-orange-600' },
           ].map(({ key, label, icon: Icon, gradient }) => (
             <button
               key={key}
               onClick={() => setMethod(key)}
               className={cn(
-                'flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold border-2 transition-all duration-200',
+                'flex items-center justify-center gap-1.5 py-3 rounded-2xl text-[13px] font-bold border-2 transition-all duration-200',
                 method === key
                   ? `bg-gradient-to-r ${gradient} text-white border-transparent shadow-md`
                   : 'border-border text-muted-foreground hover:border-border/80 hover:bg-muted/40'
@@ -295,6 +319,53 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
             </button>
           ))}
         </div>
+
+        {/* Credit (ნისია): pick a customer + how much is paid now */}
+        {method === 'credit' && (
+          <div className="flex flex-col gap-2.5 p-3 rounded-2xl border-2 border-amber-200 bg-amber-50/50 animate-fade-up">
+            <div className="flex items-center gap-2">
+              <Select value={customerId} onValueChange={(v: string | null) => setCustomerId(v ?? '')}>
+                <SelectTrigger className="h-10 rounded-xl bg-white border-amber-200 flex-1">
+                  <SelectValue placeholder="აირჩიეთ კლიენტი...">
+                    {(v: string | null) => customers.find(c => c.id === v)?.name ?? 'აირჩიეთ კლიენტი...'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  {customers.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">კლიენტი არ არის — დაამატე →</div>
+                  ) : customers.map(c => (
+                    <SelectItem key={c.id} value={c.id} className="rounded-lg">
+                      {c.name}{c.balance > 0 ? ` · ვალი ₾${c.balance.toFixed(2)}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <button
+                onClick={() => setCustomerDialogOpen(true)}
+                title="ახალი კლიენტი"
+                className="size-10 rounded-xl bg-white border border-amber-200 text-amber-600 hover:bg-amber-100 flex items-center justify-center shrink-0 transition-colors"
+              >
+                <UserPlus className="size-4.5" />
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₾</span>
+                <input
+                  type="number" min="0" inputMode="decimal"
+                  value={paidNow}
+                  onChange={e => setPaidNow(e.target.value)}
+                  placeholder="გადახდილი ახლა (0 = სრულად ვალში)"
+                  className="w-full h-10 pl-7 pr-3 text-sm bg-white border border-amber-200 rounded-xl outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
+                />
+              </div>
+              <div className="text-right shrink-0 px-1">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-none">ვალში</p>
+                <p className="text-sm font-black text-amber-700 tabular-nums">₾{creditDebt.toFixed(2)}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Fiscal receipt toggle */}
         <button
@@ -348,7 +419,10 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
           </button>
           <button
             disabled={items.length === 0 || isSelling}
-            onClick={() => setConfirmOpen(true)}
+            onClick={() => {
+              if (method === 'credit' && !customerId) { toast.error('ნისიისთვის აირჩიეთ კლიენტი'); return }
+              setConfirmOpen(true)
+            }}
             className={cn(
               'flex-1 py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 transition-all duration-200',
               items.length === 0 || isSelling
@@ -368,7 +442,13 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
           <AlertDialogHeader>
             <AlertDialogTitle>გაყიდვის დადასტურება</AlertDialogTitle>
             <AlertDialogDescription>
-              სულ: <strong className="text-foreground">₾{total.toFixed(2)}</strong> &bull; გადახდა: <strong className="text-foreground">{method === 'cash' ? 'ნაღდი' : 'ბარათი'}</strong>
+              სულ: <strong className="text-foreground">₾{total.toFixed(2)}</strong> &bull; გადახდა: <strong className="text-foreground">{methodLabel}</strong>
+              {method === 'credit' && (
+                <span className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
+                  <Users className="size-3.5" />
+                  {selectedCustomer?.name} — გადახდილი ₾{paidNowValue.toFixed(2)}, ვალში ₾{creditDebt.toFixed(2)}
+                </span>
+              )}
               <span className={cn('mt-2 flex items-center gap-1.5 text-xs font-semibold', fiscalEnabled ? 'text-primary' : 'text-muted-foreground')}>
                 <ReceiptText className="size-3.5" />
                 {fiscalEnabled ? 'ფისკალური ჩეკი ამოიბეჭდება' : 'ფისკალური ჩეკის გარეშე'}
@@ -481,6 +561,13 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>გადახდა:</span><span className="font-semibold">{lastSale.method}</span>
               </div>
+              {lastSale.customerName && (
+                <div className="flex flex-col gap-1 text-xs bg-amber-50 rounded-lg px-2.5 py-2">
+                  <div className="flex justify-between"><span className="text-amber-800 font-semibold flex items-center gap-1"><Users className="size-3.5" /> {lastSale.customerName}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>გადახდილი:</span><span className="font-semibold text-foreground">₾{(lastSale.paid ?? 0).toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-amber-700 font-semibold">ვალში დარჩა:</span><span className="font-black text-amber-700">₾{(lastSale.debt ?? 0).toFixed(2)}</span></div>
+                </div>
+              )}
               {lastSale.fiscalId && (
                 <div className="flex justify-between text-xs text-emerald-700 bg-emerald-50 rounded-lg px-2 py-1.5">
                   <span className="flex items-center gap-1"><ReceiptText className="size-3.5" /> ფისკალური ჩეკი:</span>
@@ -502,6 +589,13 @@ export function CartPanel({ items, onUpdate, onRemove, onClear, onResume, classN
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Quick-add customer from the credit flow */}
+      <CustomerDialog
+        open={customerDialogOpen}
+        onClose={() => setCustomerDialogOpen(false)}
+        onCreated={(c) => setCustomerId(c.id)}
+      />
     </aside>
   )
 }

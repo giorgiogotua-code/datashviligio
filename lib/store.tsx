@@ -15,6 +15,8 @@ import {
   type Purchase,
   type PurchaseItem,
   type SupplierPayment,
+  type Customer,
+  type CustomerPayment,
 } from './mock-data'
 
 const supabase = createClient()
@@ -36,6 +38,8 @@ export interface StoreState {
   purchases: Purchase[]
   purchaseItems: PurchaseItem[]
   supplierPayments: SupplierPayment[]
+  customers: Customer[]
+  customerPayments: CustomerPayment[]
   settings: Settings
   pin: string
   isHydrated: boolean
@@ -58,7 +62,8 @@ export interface StoreState {
   updateProduct: (id: string, p: Partial<Product>) => Promise<void>
   deleteProduct: (id: string) => Promise<void>
   addSale: (
-    sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'> & { discount?: number },
+    sale: Pick<Sale, 'total' | 'payment_method' | 'items_count' | 'is_fiscal'> &
+      { discount?: number; customer_id?: string | null; customer_name?: string | null; paid?: number },
     items: Omit<SaleItem, 'id' | 'sale_id' | 'unit_cost'>[]
   ) => Promise<Sale | null>
   // Held (parked) carts — persisted in Supabase so they survive refresh.
@@ -81,6 +86,11 @@ export interface StoreState {
     items: Omit<PurchaseItem, 'id' | 'purchase_id'>[]
   ) => Promise<Purchase | null>
   paySupplier: (supplierId: string, amount: number, note?: string | null) => Promise<void>
+  // Customers & credit (ნისია)
+  addCustomer: (c: Pick<Customer, 'name' | 'phone' | 'note'>) => Promise<Customer | null>
+  updateCustomer: (id: string, c: Partial<Customer>) => Promise<void>
+  deleteCustomer: (id: string) => Promise<void>
+  payCustomer: (customerId: string, amount: number, note?: string | null) => Promise<void>
   addReturn: (
     original: Sale,
     items: Omit<SaleItem, 'id' | 'sale_id' | 'unit_cost'>[]
@@ -121,6 +131,9 @@ function mapSale(r: any): Sale {
     total: num(r.total),
     discount: num(r.discount),
     payment_method: r.payment_method,
+    customer_id: r.customer_id ?? null,
+    customer_name: r.customer_name ?? null,
+    paid: num(r.paid),
     items_count: num(r.items_count),
     created_at: r.created_at,
     type: r.type ?? 'sale',
@@ -196,6 +209,27 @@ function mapSupplierPayment(r: any): SupplierPayment {
   }
 }
 
+function mapCustomer(r: any): Customer {
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone ?? null,
+    note: r.note ?? null,
+    balance: num(r.balance),
+    created_at: r.created_at,
+  }
+}
+
+function mapCustomerPayment(r: any): CustomerPayment {
+  return {
+    id: r.id,
+    customer_id: r.customer_id,
+    amount: num(r.amount),
+    note: r.note ?? null,
+    created_at: r.created_at,
+  }
+}
+
 function mapSaleItem(r: any): SaleItem {
   return {
     id: r.id,
@@ -238,6 +272,8 @@ export const useStore = create<StoreState>()(
       purchases: [],
       purchaseItems: [],
       supplierPayments: [],
+      customers: [],
+      customerPayments: [],
       settings: DEFAULT_SETTINGS,
       pin: '1234',
       isHydrated: false,
@@ -247,7 +283,7 @@ export const useStore = create<StoreState>()(
 
       // ---- Load everything from Supabase ----
       hydrate: async () => {
-        const [cats, prods, sales, items, settingsRows, held, sups, purch, purchItems, supPays] = await Promise.all([
+        const [cats, prods, sales, items, settingsRows, held, sups, purch, purchItems, supPays, custs, custPays] = await Promise.all([
           supabase.from('categories').select('*').order('created_at', { ascending: true }),
           supabase.from('products').select('*').order('created_at', { ascending: false }),
           supabase.from('sales').select('*').order('created_at', { ascending: false }),
@@ -258,6 +294,8 @@ export const useStore = create<StoreState>()(
           supabase.from('purchases').select('*').order('created_at', { ascending: false }),
           supabase.from('purchase_items').select('*'),
           supabase.from('supplier_payments').select('*').order('created_at', { ascending: false }),
+          supabase.from('customers').select('*').order('created_at', { ascending: false }),
+          supabase.from('customer_payments').select('*').order('created_at', { ascending: false }),
         ])
 
         if (cats.error || prods.error || sales.error || items.error || settingsRows.error) {
@@ -270,6 +308,8 @@ export const useStore = create<StoreState>()(
         if (held.error) console.error('held_carts load error', held.error)
         if (sups.error || purch.error || purchItems.error || supPays.error)
           console.error('suppliers load error', { sups, purch, purchItems, supPays })
+        if (custs.error || custPays.error)
+          console.error('customers load error', { custs, custPays })
 
         // settings key-value rows -> Settings object (+ pin)
         const kv: Record<string, string> = {}
@@ -291,6 +331,8 @@ export const useStore = create<StoreState>()(
           purchases: (purch.data ?? []).map(mapPurchase),
           purchaseItems: (purchItems.data ?? []).map(mapPurchaseItem),
           supplierPayments: (supPays.data ?? []).map(mapSupplierPayment),
+          customers: (custs.data ?? []).map(mapCustomer),
+          customerPayments: (custPays.data ?? []).map(mapCustomerPayment),
           settings,
           pin: kv.pin ?? '1234',
           isHydrated: true,
@@ -412,6 +454,9 @@ export const useStore = create<StoreState>()(
           p_items: items,
           p_type: 'sale',
           p_discount: sale.discount ?? 0,
+          p_customer_id: sale.customer_id ?? null,
+          p_customer_name: sale.customer_name ?? null,
+          p_paid: sale.paid ?? null,
         })
         if (error) {
           // Server rejected an oversell (stock changed under us) — show real stock.
@@ -432,6 +477,8 @@ export const useStore = create<StoreState>()(
         const saleRow = (data as any).sale
         const savedItems = ((data as any).items ?? []) as any[]
         const newSale = mapSale(saleRow)
+        // Unpaid remainder of a credit sale increases the customer's debt locally.
+        const debtAdded = sale.customer_id ? sale.total - (sale.paid ?? sale.total) : 0
         set((state) => ({
           sales: [newSale, ...state.sales],
           saleItems: [...state.saleItems, ...savedItems.map(mapSaleItem)],
@@ -439,6 +486,9 @@ export const useStore = create<StoreState>()(
             const sold = items.find((i) => i.product_id === p.id)
             return sold ? { ...p, quantity: Math.max(0, p.quantity - sold.quantity) } : p
           }),
+          customers: debtAdded !== 0
+            ? state.customers.map((c) => (c.id === sale.customer_id ? { ...c, balance: c.balance + debtAdded } : c))
+            : state.customers,
         }))
         return newSale
       },
@@ -565,6 +615,46 @@ export const useStore = create<StoreState>()(
         set((state) => ({
           supplierPayments: [payment, ...state.supplierPayments],
           suppliers: state.suppliers.map((s) => (s.id === supplierId ? supplier : s)),
+        }))
+      },
+
+      // ---- Customers (credit / ნისია) ----
+      addCustomer: async (c) => {
+        const { data, error } = await supabase
+          .from('customers')
+          .insert({ name: c.name, phone: c.phone, note: c.note })
+          .select()
+          .single()
+        if (failed(error, 'კლიენტის დამატება ვერ მოხერხდა') || !data) return null
+        const cust = mapCustomer(data)
+        set((state) => ({ customers: [cust, ...state.customers] }))
+        return cust
+      },
+
+      updateCustomer: async (id, c) => {
+        const { error } = await supabase.from('customers').update(c).eq('id', id)
+        if (failed(error, 'კლიენტის განახლება ვერ მოხერხდა')) return
+        set((state) => ({ customers: state.customers.map((x) => (x.id === id ? { ...x, ...c } : x)) }))
+      },
+
+      deleteCustomer: async (id) => {
+        const { error } = await supabase.from('customers').delete().eq('id', id)
+        if (failed(error, 'კლიენტის წაშლა ვერ მოხერხდა')) return
+        set((state) => ({ customers: state.customers.filter((x) => x.id !== id) }))
+      },
+
+      payCustomer: async (customerId, amount, note) => {
+        const { data, error } = await supabase.rpc('pay_customer', {
+          p_customer_id: customerId,
+          p_amount: amount,
+          p_note: note ?? null,
+        })
+        if (failed(error, 'გადახდის შენახვა ვერ მოხერხდა') || !data) return
+        const payment = mapCustomerPayment((data as any).payment)
+        const customer = mapCustomer((data as any).customer)
+        set((state) => ({
+          customerPayments: [payment, ...state.customerPayments],
+          customers: state.customers.map((c) => (c.id === customerId ? customer : c)),
         }))
       },
 

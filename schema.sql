@@ -10,6 +10,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Clean slate (so the file can be re-run without errors)
 DROP TABLE IF EXISTS fiscal_reports CASCADE;
 DROP TABLE IF EXISTS held_carts CASCADE;
+DROP TABLE IF EXISTS customer_payments CASCADE;
+DROP TABLE IF EXISTS customers CASCADE;
 DROP TABLE IF EXISTS sale_items CASCADE;
 DROP TABLE IF EXISTS sales CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
@@ -46,13 +48,28 @@ CREATE INDEX idx_products_category ON products(category_id);
 CREATE INDEX idx_products_barcode  ON products(barcode);
 
 -- ============================================================
+--  CUSTOMERS (credit / ნისია — created before sales for the FK)
+-- ============================================================
+CREATE TABLE customers (
+  id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name       TEXT NOT NULL,
+  phone      TEXT,
+  note       TEXT,
+  balance    DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- amount the customer OWES US (positive = their debt)
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 --  SALES (one row per receipt)
 -- ============================================================
 CREATE TABLE sales (
   id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   total          DECIMAL(10, 2) NOT NULL,
   discount       DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- discount amount applied (total is already net)
-  payment_method TEXT CHECK (payment_method IN ('cash', 'card')) NOT NULL,
+  payment_method TEXT CHECK (payment_method IN ('cash', 'card', 'credit')) NOT NULL,
+  customer_id    UUID REFERENCES customers(id) ON DELETE SET NULL,  -- for credit sales
+  customer_name  TEXT,                                              -- denormalized snapshot
+  paid           DECIMAL(10, 2) NOT NULL DEFAULT 0,                 -- amount paid at sale time (credit down-payment)
   items_count    INTEGER NOT NULL DEFAULT 0,
   type           TEXT NOT NULL DEFAULT 'sale' CHECK (type IN ('sale','return')),
   reversal_of    UUID REFERENCES sales(id) ON DELETE SET NULL,   -- for returns: original sale
@@ -90,6 +107,19 @@ CREATE TABLE settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
 );
+
+-- ============================================================
+--  CUSTOMER PAYMENTS (repayments toward a customer's debt)
+-- ============================================================
+CREATE TABLE customer_payments (
+  id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
+  amount      DECIMAL(10, 2) NOT NULL,
+  note        TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_customer_payments_customer ON customer_payments(customer_id);
+CREATE INDEX idx_sales_customer ON sales(customer_id);
 
 -- ============================================================
 --  HELD CARTS (parked sales waiting at the counter)
@@ -134,17 +164,21 @@ ALTER TABLE categories     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sale_items     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settings       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE held_carts     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE fiscal_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE held_carts        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fiscal_reports    ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "authenticated full access" ON categories     FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON products       FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON sales          FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON sale_items     FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON settings       FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON held_carts     FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON fiscal_reports FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON categories        FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON products          FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON sales             FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON sale_items        FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON settings          FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON held_carts        FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON customers         FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON customer_payments FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON fiscal_reports    FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ============================================================
 --  ATOMIC SALE
@@ -160,7 +194,10 @@ CREATE OR REPLACE FUNCTION create_sale(
   p_items          JSONB,
   p_type           TEXT DEFAULT 'sale',
   p_reversal_of    UUID DEFAULT NULL,
-  p_discount       NUMERIC DEFAULT 0
+  p_discount       NUMERIC DEFAULT 0,
+  p_customer_id    UUID DEFAULT NULL,
+  p_customer_name  TEXT DEFAULT NULL,
+  p_paid           NUMERIC DEFAULT NULL
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -173,10 +210,13 @@ DECLARE
   v_qty   INTEGER;
   v_avail INTEGER;
   v_cost  NUMERIC;
+  v_paid  NUMERIC := COALESCE(p_paid, p_total);  -- non-credit sales are fully paid
 BEGIN
-  INSERT INTO sales(total, discount, payment_method, items_count, is_fiscal, fiscal_status, type, reversal_of)
+  INSERT INTO sales(total, discount, payment_method, items_count, is_fiscal, fiscal_status,
+                    type, reversal_of, customer_id, customer_name, paid)
   VALUES (p_total, COALESCE(p_discount, 0), p_payment_method, p_items_count, p_is_fiscal,
-          CASE WHEN p_is_fiscal THEN 'pending' ELSE 'none' END, p_type, p_reversal_of)
+          CASE WHEN p_is_fiscal THEN 'pending' ELSE 'none' END, p_type, p_reversal_of,
+          p_customer_id, p_customer_name, v_paid)
   RETURNING * INTO v_sale;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
@@ -212,9 +252,41 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- Unpaid remainder of a credit sale becomes the customer's debt.
+  IF p_customer_id IS NOT NULL AND p_type = 'sale' THEN
+    UPDATE customers SET balance = balance + (p_total - v_paid) WHERE id = p_customer_id;
+  END IF;
+
   RETURN jsonb_build_object(
     'sale', to_jsonb(v_sale),
     'items', (SELECT COALESCE(jsonb_agg(to_jsonb(si)), '[]'::jsonb) FROM sale_items si WHERE si.sale_id = v_sale.id)
   );
+END;
+$$;
+
+-- ============================================================
+--  PAY CUSTOMER — record a repayment and lower their debt.
+-- ============================================================
+CREATE OR REPLACE FUNCTION pay_customer(
+  p_customer_id UUID,
+  p_amount      NUMERIC,
+  p_note        TEXT DEFAULT NULL
+) RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_payment customer_payments;
+  v_customer customers;
+BEGIN
+  INSERT INTO customer_payments(customer_id, amount, note)
+  VALUES (p_customer_id, p_amount, p_note)
+  RETURNING * INTO v_payment;
+
+  UPDATE customers SET balance = balance - p_amount
+    WHERE id = p_customer_id
+    RETURNING * INTO v_customer;
+
+  RETURN jsonb_build_object('payment', to_jsonb(v_payment), 'customer', to_jsonb(v_customer));
 END;
 $$;

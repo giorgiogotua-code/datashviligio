@@ -63,7 +63,7 @@ export function ReturnDialog({ open, onClose, sale, items }: Props) {
         try {
           const result = await issueFiscalReversal({
             total: returnTotal,
-            paymentMethod: sale.payment_method,
+            paymentMethod: sale.payment_method === 'card' ? 'card' : 'cash',
             originalFiscalId: sale.fiscal_id,
             originalDateTime: sale.created_at,
             reason: 'refund',

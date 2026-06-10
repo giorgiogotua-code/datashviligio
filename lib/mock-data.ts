@@ -25,11 +25,16 @@ export type FiscalStatus = 'none' | 'pending' | 'success' | 'failed'
 
 export type SaleType = 'sale' | 'return'
 
+export type PaymentMethod = 'cash' | 'card' | 'credit'
+
 export type Sale = {
   id: string
   total: number               // net total (after discount)
   discount?: number           // discount amount applied
-  payment_method: 'cash' | 'card'
+  payment_method: PaymentMethod
+  customer_id?: string | null  // credit sales
+  customer_name?: string | null
+  paid?: number                // amount paid at sale time (credit down-payment)
   items_count: number
   created_at: string
   type: SaleType
@@ -96,6 +101,24 @@ export type PurchaseItem = {
 export type SupplierPayment = {
   id: string
   supplier_id: string
+  amount: number
+  note: string | null
+  created_at: string
+}
+
+// ---- Customers & credit (ნისია) ----
+export type Customer = {
+  id: string
+  name: string
+  phone: string | null
+  note: string | null
+  balance: number          // amount the customer OWES US (positive = their debt)
+  created_at: string
+}
+
+export type CustomerPayment = {
+  id: string
+  customer_id: string
   amount: number
   note: string | null
   created_at: string

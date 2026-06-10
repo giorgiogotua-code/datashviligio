@@ -43,7 +43,7 @@ export function SalesHistory({ sales, saleItems }: Props) {
       const result = await issueFiscalReceipt({
         saleId: sale.id,
         total: sale.total,
-        paymentMethod: sale.payment_method,
+        paymentMethod: sale.payment_method === 'card' ? 'card' : 'cash',
         items: items.map(i => ({
           name: i.product_name, quantity: i.quantity, unitPrice: i.unit_price,
           total: i.total_price, barcode: i.barcode,
