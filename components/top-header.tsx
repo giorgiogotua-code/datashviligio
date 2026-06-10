@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut } from 'lucide-react'
+import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut, AlertTriangle, PackageX, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { createClient } from '@/lib/supabase/client'
@@ -22,11 +22,28 @@ export function TopHeader() {
   const pathname = usePathname()
   const key = Object.keys(MODULE_MAP).find(k => pathname.startsWith(k)) ?? '/warehouse'
   const { label, icon: Icon, gradient, sub } = MODULE_MAP[key]
-  const { lock, setMobileSidebarOpen } = useStore()
+  const { lock, setMobileSidebarOpen, products } = useStore()
   const router = useRouter()
 
   const [dateLabel, setDateLabel] = useState<string | null>(null)
-  const [notifCount] = useState(3)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+
+  // Real notifications: out-of-stock first, then low-stock (<= 5)
+  const lowStock = products
+    .filter(p => p.quantity <= 5)
+    .sort((a, b) => a.quantity - b.quantity)
+  const notifCount = lowStock.length
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!notifOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [notifOpen])
 
   const handleLogout = async () => {
     const supabase = createClient()
@@ -95,15 +112,86 @@ export function TopHeader() {
           <Lock className="size-4 text-muted-foreground group-hover:text-red-500 transition-colors" />
         </button>
 
-        {/* Bell */}
-        <button className="relative size-9 rounded-xl border border-border bg-white hover:bg-accent hover:border-accent transition-all duration-150 flex items-center justify-center group">
-          <Bell className="size-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-          {notifCount > 0 && (
-            <span className="absolute -top-1 -right-1 size-4 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
-              {notifCount}
-            </span>
+        {/* Bell + notifications dropdown */}
+        <div className="relative" ref={notifRef}>
+          <button
+            onClick={() => setNotifOpen(o => !o)}
+            title="შეტყობინებები"
+            className={cn(
+              "relative size-9 rounded-xl border transition-all duration-150 flex items-center justify-center group",
+              notifOpen ? "bg-accent border-accent" : "border-border bg-white hover:bg-accent hover:border-accent"
+            )}
+          >
+            <Bell className="size-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+            {notifCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {notifCount}
+              </span>
+            )}
+          </button>
+
+          {notifOpen && (
+            <div className="absolute right-0 top-12 z-50 w-80 max-h-[70vh] bg-white rounded-2xl border border-border shadow-xl shadow-black/10 overflow-hidden animate-fade-up flex flex-col">
+              {/* Header */}
+              <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-border bg-gradient-to-r from-amber-500/5 to-orange-500/5">
+                <div className="size-8 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-sm">
+                  <AlertTriangle className="size-4 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-foreground leading-tight">მარაგის შეტყობინებები</p>
+                  <p className="text-[11px] text-muted-foreground leading-none mt-0.5">დაბალი მარაგის პროდუქცია</p>
+                </div>
+                {notifCount > 0 && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-red-50 text-red-600 border border-red-100">{notifCount}</span>
+                )}
+              </div>
+
+              {/* List */}
+              <div className="overflow-y-auto flex-1">
+                {lowStock.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2.5 py-10 text-muted-foreground">
+                    <CheckCircle2 className="size-8 text-emerald-400" />
+                    <p className="text-sm font-medium">ყველა მარაგი საკმარისია</p>
+                  </div>
+                ) : (
+                  lowStock.map(p => {
+                    const out = p.quantity === 0
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => { setNotifOpen(false); router.push('/warehouse') }}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/60 transition-colors text-left border-b border-border/40 last:border-0"
+                      >
+                        <div className={cn(
+                          "size-9 rounded-xl flex items-center justify-center shrink-0",
+                          out ? "bg-red-50 text-red-500" : "bg-amber-50 text-amber-600"
+                        )}>
+                          {out ? <PackageX className="size-4" /> : <Package className="size-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{p.name}</p>
+                          <p className={cn("text-[11px] font-medium", out ? "text-red-500" : "text-amber-600")}>
+                            {out ? 'მარაგი ამოიწურა' : `დარჩა ${p.quantity} ცალი`}
+                          </p>
+                        </div>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              {lowStock.length > 0 && (
+                <button
+                  onClick={() => { setNotifOpen(false); router.push('/warehouse') }}
+                  className="px-4 py-3 border-t border-border text-center text-xs font-bold text-primary hover:bg-primary/5 transition-colors"
+                >
+                  საწყობში გადასვლა →
+                </button>
+              )}
+            </div>
           )}
-        </button>
+        </div>
 
         {/* Logout */}
         <button

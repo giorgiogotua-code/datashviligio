@@ -153,11 +153,18 @@ export function ProductGrid({ onAddToCart }: Props) {
                       </div>
                     )}
 
-                    {/* Stock badge */}
-                    {!outOfStock && product.quantity <= 5 && (
+                    {/* Stock badge — always show how many are in stock */}
+                    {!outOfStock && (
                       <div className="absolute top-2 left-2">
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-amber-500 text-white shadow-sm">
-                          {product.quantity} დარჩა
+                        <span className={cn(
+                          "text-[10px] font-bold px-1.5 py-0.5 rounded-lg shadow-sm backdrop-blur-sm",
+                          product.quantity <= 5
+                            ? "bg-amber-500 text-white"
+                            : "bg-black/55 text-white"
+                        )}>
+                          {product.quantity <= 5
+                            ? `${product.quantity} დარჩა`
+                            : `${product.quantity} ცალი`}
                         </span>
                       </div>
                     )}
