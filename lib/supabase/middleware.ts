@@ -33,8 +33,11 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const isAuthRoute = request.nextUrl.pathname === '/login' || request.nextUrl.pathname.startsWith('/auth')
-  const isPublicRoute = isAuthRoute || request.nextUrl.pathname.startsWith('/api/') || request.nextUrl.pathname.startsWith('/_next')
+  const { pathname } = request.nextUrl
+  const isAuthRoute = pathname === '/login' || pathname.startsWith('/auth')
+  // PWA assets must be reachable without auth so the install prompt works
+  const isPwaAsset = pathname === '/manifest.webmanifest' || pathname === '/sw.js' || pathname.startsWith('/icons/')
+  const isPublicRoute = isAuthRoute || isPwaAsset || pathname.startsWith('/api/') || pathname.startsWith('/_next')
 
   if (!user && !isPublicRoute) {
     // no user, potentially respond by redirecting the user to the login page
