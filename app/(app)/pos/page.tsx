@@ -4,14 +4,18 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { ProductGrid } from '@/components/pos/product-grid'
 import { CartPanel, type CartItem } from '@/components/pos/cart-panel'
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet'
-import { ShoppingCart } from 'lucide-react'
+import { ShoppingCart, Lock, Play } from 'lucide-react'
 import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
 import { useStore } from '@/lib/store'
 import { toast } from 'sonner'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { OpenShiftDialog } from '@/components/shifts/open-shift-dialog'
 
 export default function POSPage() {
   const { products } = useStore()
+  const currentShift = useStore(s => s.shifts.find(x => x.status === 'open'))
+  const isHydrated = useStore(s => s.isHydrated)
+  const [openShiftDialog, setOpenShiftDialog] = useState(false)
   const [cartItems, setCartItems] = useState<CartItem[]>([])
   const cartItemsRef = useRef(cartItems)
   const productsRef = useRef(products)
@@ -41,8 +45,9 @@ export default function POSPage() {
     }
   }, [])
 
-  // Global barcode scanner — auto-adds scanned product to cart
+  // Global barcode scanner — auto-adds scanned product to cart (only while a shift is open)
   useBarcodeScanner({
+    disabled: !currentShift,
     onScan: (code: string) => {
       const product = products.find(p => p.barcode === code)
       if (!product) {
@@ -125,6 +130,30 @@ export default function POSPage() {
   const confirmingProduct = qtyConfirmObj 
     ? cartItems.find(i => i.product_id === qtyConfirmObj.productId)?.product_name 
     : ''
+
+  // Selling requires an open shift.
+  if (isHydrated && !currentShift) {
+    return (
+      <div className="h-full flex items-center justify-center animate-fade-up">
+        <div className="max-w-md w-full text-center bg-white rounded-3xl border border-border shadow-sm p-8 flex flex-col items-center gap-5">
+          <div className="size-20 rounded-3xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-400/25">
+            <Lock className="size-9 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-foreground">ცვლა დახურულია</h2>
+            <p className="text-sm text-muted-foreground mt-2">გაყიდვის დასაწყებად კასირმა უნდა გახსნას ცვლა PIN-ით და მიუთითოს საწყისი თანხა კასაში.</p>
+          </div>
+          <button
+            onClick={() => setOpenShiftDialog(true)}
+            className="flex items-center gap-2 h-12 px-7 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-black shadow-lg shadow-emerald-500/30 hover:-translate-y-0.5 transition-transform"
+          >
+            <Play className="size-5" /> ცვლის გახსნა
+          </button>
+        </div>
+        <OpenShiftDialog open={openShiftDialog} onClose={() => setOpenShiftDialog(false)} />
+      </div>
+    )
+  }
 
   return (
     <div className="flex gap-5 h-full min-h-0 relative pb-24 lg:pb-0 animate-fade-up">

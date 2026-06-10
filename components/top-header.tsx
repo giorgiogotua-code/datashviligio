@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut, AlertTriangle, PackageX, CheckCircle2, Truck, BookOpen, HandCoins } from 'lucide-react'
+import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut, AlertTriangle, PackageX, CheckCircle2, Truck, BookOpen, HandCoins, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { createClient } from '@/lib/supabase/client'
+import { ShiftControl } from '@/components/shifts/shift-control'
 import { toast } from 'sonner'
 
 const MODULE_MAP: Record<string, { label: string; icon: React.ElementType; gradient: string; sub: string }> = {
@@ -15,6 +16,7 @@ const MODULE_MAP: Record<string, { label: string; icon: React.ElementType; gradi
   '/credit':    { label: 'ნისია',        icon: HandCoins,    gradient: 'from-amber-500 to-orange-600',   sub: 'კლიენტების ვალები' },
   '/accounting':{ label: 'ბუღალტერია',   icon: BarChart2,    gradient: 'from-emerald-500 to-teal-600',  sub: 'ანგარიშები & ანალიტიკა' },
   '/guide':     { label: 'სახელმძღვანელო', icon: BookOpen,   gradient: 'from-pink-500 to-rose-600',     sub: 'როგორ ვიმუშაო სისტემაში' },
+  '/staff':     { label: 'თანამშრომლები', icon: Users,       gradient: 'from-fuchsia-500 to-pink-600',   sub: 'კასირები და ცვლები' },
   '/settings':  { label: 'პარამეტრები',  icon: Settings,     gradient: 'from-slate-500 to-slate-700',   sub: 'სისტემის კონფიგურაცია' },
 }
 
@@ -98,8 +100,10 @@ export function TopHeader() {
         </div>
       </div>
 
-      {/* Right: date + bell + avatar */}
+      {/* Right: shift + date + bell + avatar */}
       <div className="flex items-center gap-3">
+        <ShiftControl />
+
         {dateLabel && (
           <span className="hidden lg:block text-xs text-muted-foreground bg-muted px-3 py-1.5 rounded-lg border border-border">
             {dateLabel}

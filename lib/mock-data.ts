@@ -35,6 +35,9 @@ export type Sale = {
   customer_id?: string | null  // credit sales
   customer_name?: string | null
   paid?: number                // amount paid at sale time (credit down-payment)
+  shift_id?: string | null
+  cashier_id?: string | null
+  cashier_name?: string | null
   items_count: number
   created_at: string
   type: SaleType
@@ -122,6 +125,34 @@ export type CustomerPayment = {
   amount: number
   note: string | null
   created_at: string
+}
+
+// ---- Cashiers & shifts (ცვლები) ----
+export type Cashier = {
+  id: string
+  name: string
+  pin: string
+  active: boolean
+  created_at: string
+}
+
+export type Shift = {
+  id: string
+  cashier_id: string | null
+  cashier_name: string | null
+  status: 'open' | 'closed'
+  opening_cash: number
+  closing_cash: number | null
+  cash_sales: number
+  card_sales: number
+  credit_sales: number
+  credit_paid: number
+  returns_total: number
+  sales_count: number
+  expected_cash: number
+  difference: number
+  opened_at: string
+  closed_at: string | null
 }
 
 export type DiscountType = 'amount' | 'percent'

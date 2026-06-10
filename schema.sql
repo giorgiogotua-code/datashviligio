@@ -12,6 +12,8 @@ DROP TABLE IF EXISTS fiscal_reports CASCADE;
 DROP TABLE IF EXISTS held_carts CASCADE;
 DROP TABLE IF EXISTS customer_payments CASCADE;
 DROP TABLE IF EXISTS customers CASCADE;
+DROP TABLE IF EXISTS shifts CASCADE;
+DROP TABLE IF EXISTS cashiers CASCADE;
 DROP TABLE IF EXISTS sale_items CASCADE;
 DROP TABLE IF EXISTS sales CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
@@ -60,6 +62,37 @@ CREATE TABLE customers (
 );
 
 -- ============================================================
+--  CASHIERS + SHIFTS (created before sales for the FKs)
+-- ============================================================
+CREATE TABLE cashiers (
+  id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name       TEXT NOT NULL,
+  pin        TEXT NOT NULL,
+  active     BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE shifts (
+  id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  cashier_id    UUID REFERENCES cashiers(id) ON DELETE SET NULL,
+  cashier_name  TEXT,
+  status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  opening_cash  DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  closing_cash  DECIMAL(10, 2),
+  cash_sales    DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  card_sales    DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  credit_sales  DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  credit_paid   DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  returns_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  sales_count   INTEGER NOT NULL DEFAULT 0,
+  expected_cash DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  difference    DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  opened_at     TIMESTAMPTZ DEFAULT NOW(),
+  closed_at     TIMESTAMPTZ
+);
+CREATE INDEX idx_shifts_status ON shifts(status);
+
+-- ============================================================
 --  SALES (one row per receipt)
 -- ============================================================
 CREATE TABLE sales (
@@ -70,6 +103,9 @@ CREATE TABLE sales (
   customer_id    UUID REFERENCES customers(id) ON DELETE SET NULL,  -- for credit sales
   customer_name  TEXT,                                              -- denormalized snapshot
   paid           DECIMAL(10, 2) NOT NULL DEFAULT 0,                 -- amount paid at sale time (credit down-payment)
+  shift_id       UUID REFERENCES shifts(id) ON DELETE SET NULL,     -- the open shift this sale belongs to
+  cashier_id     UUID REFERENCES cashiers(id) ON DELETE SET NULL,
+  cashier_name   TEXT,
   items_count    INTEGER NOT NULL DEFAULT 0,
   type           TEXT NOT NULL DEFAULT 'sale' CHECK (type IN ('sale','return')),
   reversal_of    UUID REFERENCES sales(id) ON DELETE SET NULL,   -- for returns: original sale
@@ -168,6 +204,8 @@ ALTER TABLE settings          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE held_carts        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customers         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customer_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cashiers          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shifts            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fiscal_reports    ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "authenticated full access" ON categories        FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -178,6 +216,8 @@ CREATE POLICY "authenticated full access" ON settings          FOR ALL TO authen
 CREATE POLICY "authenticated full access" ON held_carts        FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON customers         FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON customer_payments FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON cashiers          FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "authenticated full access" ON shifts            FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "authenticated full access" ON fiscal_reports    FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ============================================================
@@ -197,7 +237,10 @@ CREATE OR REPLACE FUNCTION create_sale(
   p_discount       NUMERIC DEFAULT 0,
   p_customer_id    UUID DEFAULT NULL,
   p_customer_name  TEXT DEFAULT NULL,
-  p_paid           NUMERIC DEFAULT NULL
+  p_paid           NUMERIC DEFAULT NULL,
+  p_shift_id       UUID DEFAULT NULL,
+  p_cashier_id     UUID DEFAULT NULL,
+  p_cashier_name   TEXT DEFAULT NULL
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -213,10 +256,10 @@ DECLARE
   v_paid  NUMERIC := COALESCE(p_paid, p_total);  -- non-credit sales are fully paid
 BEGIN
   INSERT INTO sales(total, discount, payment_method, items_count, is_fiscal, fiscal_status,
-                    type, reversal_of, customer_id, customer_name, paid)
+                    type, reversal_of, customer_id, customer_name, paid, shift_id, cashier_id, cashier_name)
   VALUES (p_total, COALESCE(p_discount, 0), p_payment_method, p_items_count, p_is_fiscal,
           CASE WHEN p_is_fiscal THEN 'pending' ELSE 'none' END, p_type, p_reversal_of,
-          p_customer_id, p_customer_name, v_paid)
+          p_customer_id, p_customer_name, v_paid, p_shift_id, p_cashier_id, p_cashier_name)
   RETURNING * INTO v_sale;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
@@ -288,5 +331,54 @@ BEGIN
     RETURNING * INTO v_customer;
 
   RETURN jsonb_build_object('payment', to_jsonb(v_payment), 'customer', to_jsonb(v_customer));
+END;
+$$;
+
+-- ============================================================
+--  OPEN / CLOSE SHIFT (Z-report)
+-- ============================================================
+CREATE OR REPLACE FUNCTION open_shift(p_cashier_id UUID, p_cashier_name TEXT, p_opening_cash NUMERIC)
+RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER AS $$
+DECLARE v_shift shifts;
+BEGIN
+  IF EXISTS (SELECT 1 FROM shifts WHERE status = 'open') THEN
+    RAISE EXCEPTION 'SHIFT_ALREADY_OPEN' USING ERRCODE = 'P0001';
+  END IF;
+  INSERT INTO shifts(cashier_id, cashier_name, opening_cash, status)
+  VALUES (p_cashier_id, p_cashier_name, COALESCE(p_opening_cash, 0), 'open')
+  RETURNING * INTO v_shift;
+  RETURN to_jsonb(v_shift);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION close_shift(p_shift_id UUID, p_closing_cash NUMERIC)
+RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER AS $$
+DECLARE
+  v_shift shifts;
+  v_cash NUMERIC; v_card NUMERIC; v_credit NUMERIC; v_credit_paid NUMERIC;
+  v_returns NUMERIC; v_cash_returns NUMERIC; v_count INTEGER; v_expected NUMERIC; v_open_cash NUMERIC;
+BEGIN
+  SELECT opening_cash INTO v_open_cash FROM shifts WHERE id = p_shift_id;
+  SELECT
+    COALESCE(SUM(total) FILTER (WHERE payment_method='cash'   AND type='sale'),   0),
+    COALESCE(SUM(total) FILTER (WHERE payment_method='card'   AND type='sale'),   0),
+    COALESCE(SUM(total) FILTER (WHERE payment_method='credit' AND type='sale'),   0),
+    COALESCE(SUM(paid)  FILTER (WHERE payment_method='credit' AND type='sale'),   0),
+    COALESCE(SUM(total) FILTER (WHERE type='return'),                             0),
+    COALESCE(SUM(total) FILTER (WHERE type='return' AND payment_method='cash'),   0),
+    COALESCE(COUNT(*)   FILTER (WHERE type='sale'),                               0)
+  INTO v_cash, v_card, v_credit, v_credit_paid, v_returns, v_cash_returns, v_count
+  FROM sales WHERE shift_id = p_shift_id;
+
+  v_expected := COALESCE(v_open_cash,0) + v_cash + v_credit_paid - v_cash_returns;
+
+  UPDATE shifts SET
+    status='closed', closed_at=NOW(), closing_cash=COALESCE(p_closing_cash,0),
+    cash_sales=v_cash, card_sales=v_card, credit_sales=v_credit, credit_paid=v_credit_paid,
+    returns_total=v_returns, sales_count=v_count, expected_cash=v_expected,
+    difference=COALESCE(p_closing_cash,0) - v_expected
+  WHERE id = p_shift_id
+  RETURNING * INTO v_shift;
+  RETURN to_jsonb(v_shift);
 END;
 $$;

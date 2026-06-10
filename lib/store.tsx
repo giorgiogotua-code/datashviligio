@@ -17,6 +17,8 @@ import {
   type SupplierPayment,
   type Customer,
   type CustomerPayment,
+  type Cashier,
+  type Shift,
 } from './mock-data'
 
 const supabase = createClient()
@@ -40,6 +42,8 @@ export interface StoreState {
   supplierPayments: SupplierPayment[]
   customers: Customer[]
   customerPayments: CustomerPayment[]
+  cashiers: Cashier[]
+  shifts: Shift[]
   settings: Settings
   pin: string
   isHydrated: boolean
@@ -91,6 +95,12 @@ export interface StoreState {
   updateCustomer: (id: string, c: Partial<Customer>) => Promise<void>
   deleteCustomer: (id: string) => Promise<void>
   payCustomer: (customerId: string, amount: number, note?: string | null) => Promise<void>
+  // Cashiers & shifts (ცვლები)
+  addCashier: (c: Pick<Cashier, 'name' | 'pin'>) => Promise<Cashier | null>
+  updateCashier: (id: string, c: Partial<Cashier>) => Promise<void>
+  deleteCashier: (id: string) => Promise<void>
+  openShift: (cashierId: string, cashierName: string, openingCash: number) => Promise<Shift | null>
+  closeShift: (shiftId: string, closingCash: number) => Promise<Shift | null>
   addReturn: (
     original: Sale,
     items: Omit<SaleItem, 'id' | 'sale_id' | 'unit_cost'>[]
@@ -134,6 +144,9 @@ function mapSale(r: any): Sale {
     customer_id: r.customer_id ?? null,
     customer_name: r.customer_name ?? null,
     paid: num(r.paid),
+    shift_id: r.shift_id ?? null,
+    cashier_id: r.cashier_id ?? null,
+    cashier_name: r.cashier_name ?? null,
     items_count: num(r.items_count),
     created_at: r.created_at,
     type: r.type ?? 'sale',
@@ -230,6 +243,37 @@ function mapCustomerPayment(r: any): CustomerPayment {
   }
 }
 
+function mapCashier(r: any): Cashier {
+  return {
+    id: r.id,
+    name: r.name,
+    pin: r.pin ?? '',
+    active: r.active ?? true,
+    created_at: r.created_at,
+  }
+}
+
+function mapShift(r: any): Shift {
+  return {
+    id: r.id,
+    cashier_id: r.cashier_id ?? null,
+    cashier_name: r.cashier_name ?? null,
+    status: r.status ?? 'open',
+    opening_cash: num(r.opening_cash),
+    closing_cash: r.closing_cash == null ? null : num(r.closing_cash),
+    cash_sales: num(r.cash_sales),
+    card_sales: num(r.card_sales),
+    credit_sales: num(r.credit_sales),
+    credit_paid: num(r.credit_paid),
+    returns_total: num(r.returns_total),
+    sales_count: num(r.sales_count),
+    expected_cash: num(r.expected_cash),
+    difference: num(r.difference),
+    opened_at: r.opened_at,
+    closed_at: r.closed_at ?? null,
+  }
+}
+
 function mapSaleItem(r: any): SaleItem {
   return {
     id: r.id,
@@ -274,6 +318,8 @@ export const useStore = create<StoreState>()(
       supplierPayments: [],
       customers: [],
       customerPayments: [],
+      cashiers: [],
+      shifts: [],
       settings: DEFAULT_SETTINGS,
       pin: '1234',
       isHydrated: false,
@@ -283,7 +329,7 @@ export const useStore = create<StoreState>()(
 
       // ---- Load everything from Supabase ----
       hydrate: async () => {
-        const [cats, prods, sales, items, settingsRows, held, sups, purch, purchItems, supPays, custs, custPays] = await Promise.all([
+        const [cats, prods, sales, items, settingsRows, held, sups, purch, purchItems, supPays, custs, custPays, cashRows, shiftRows] = await Promise.all([
           supabase.from('categories').select('*').order('created_at', { ascending: true }),
           supabase.from('products').select('*').order('created_at', { ascending: false }),
           supabase.from('sales').select('*').order('created_at', { ascending: false }),
@@ -296,6 +342,8 @@ export const useStore = create<StoreState>()(
           supabase.from('supplier_payments').select('*').order('created_at', { ascending: false }),
           supabase.from('customers').select('*').order('created_at', { ascending: false }),
           supabase.from('customer_payments').select('*').order('created_at', { ascending: false }),
+          supabase.from('cashiers').select('*').order('created_at', { ascending: true }),
+          supabase.from('shifts').select('*').order('opened_at', { ascending: false }),
         ])
 
         if (cats.error || prods.error || sales.error || items.error || settingsRows.error) {
@@ -310,6 +358,8 @@ export const useStore = create<StoreState>()(
           console.error('suppliers load error', { sups, purch, purchItems, supPays })
         if (custs.error || custPays.error)
           console.error('customers load error', { custs, custPays })
+        if (cashRows.error || shiftRows.error)
+          console.error('cashiers/shifts load error', { cashRows, shiftRows })
 
         // settings key-value rows -> Settings object (+ pin)
         const kv: Record<string, string> = {}
@@ -333,6 +383,8 @@ export const useStore = create<StoreState>()(
           supplierPayments: (supPays.data ?? []).map(mapSupplierPayment),
           customers: (custs.data ?? []).map(mapCustomer),
           customerPayments: (custPays.data ?? []).map(mapCustomerPayment),
+          cashiers: (cashRows.data ?? []).map(mapCashier),
+          shifts: (shiftRows.data ?? []).map(mapShift),
           settings,
           pin: kv.pin ?? '1234',
           isHydrated: true,
@@ -446,6 +498,7 @@ export const useStore = create<StoreState>()(
       // Atomic: sale + line items + stock change happen in one DB transaction
       // (Postgres function create_sale). is_fiscal sales start as 'pending'.
       addSale: async (sale, items) => {
+        const openShiftRow = get().shifts.find((s) => s.status === 'open')
         const { data, error } = await supabase.rpc('create_sale', {
           p_total: sale.total,
           p_payment_method: sale.payment_method,
@@ -457,6 +510,9 @@ export const useStore = create<StoreState>()(
           p_customer_id: sale.customer_id ?? null,
           p_customer_name: sale.customer_name ?? null,
           p_paid: sale.paid ?? null,
+          p_shift_id: openShiftRow?.id ?? null,
+          p_cashier_id: openShiftRow?.cashier_id ?? null,
+          p_cashier_name: openShiftRow?.cashier_name ?? null,
         })
         if (error) {
           // Server rejected an oversell (stock changed under us) — show real stock.
@@ -497,6 +553,7 @@ export const useStore = create<StoreState>()(
       addReturn: async (original, items) => {
         const total = items.reduce((s, i) => s + i.total_price, 0)
         const itemsCount = items.reduce((s, i) => s + i.quantity, 0)
+        const openShiftRow = get().shifts.find((s) => s.status === 'open')
         const { data, error } = await supabase.rpc('create_sale', {
           p_total: total,
           p_payment_method: original.payment_method,
@@ -505,6 +562,9 @@ export const useStore = create<StoreState>()(
           p_items: items,
           p_type: 'return',
           p_reversal_of: original.id,
+          p_shift_id: openShiftRow?.id ?? null,
+          p_cashier_id: openShiftRow?.cashier_id ?? null,
+          p_cashier_name: openShiftRow?.cashier_name ?? null,
         })
         if (failed(error, 'დაბრუნების შენახვა ვერ მოხერხდა') || !data) return null
 
@@ -656,6 +716,60 @@ export const useStore = create<StoreState>()(
           customerPayments: [payment, ...state.customerPayments],
           customers: state.customers.map((c) => (c.id === customerId ? customer : c)),
         }))
+      },
+
+      // ---- Cashiers ----
+      addCashier: async (c) => {
+        const { data, error } = await supabase
+          .from('cashiers')
+          .insert({ name: c.name, pin: c.pin })
+          .select()
+          .single()
+        if (failed(error, 'კასირის დამატება ვერ მოხერხდა') || !data) return null
+        const cash = mapCashier(data)
+        set((state) => ({ cashiers: [...state.cashiers, cash] }))
+        return cash
+      },
+
+      updateCashier: async (id, c) => {
+        const { error } = await supabase.from('cashiers').update(c).eq('id', id)
+        if (failed(error, 'კასირის განახლება ვერ მოხერხდა')) return
+        set((state) => ({ cashiers: state.cashiers.map((x) => (x.id === id ? { ...x, ...c } : x)) }))
+      },
+
+      deleteCashier: async (id) => {
+        const { error } = await supabase.from('cashiers').delete().eq('id', id)
+        if (failed(error, 'კასირის წაშლა ვერ მოხერხდა')) return
+        set((state) => ({ cashiers: state.cashiers.filter((x) => x.id !== id) }))
+      },
+
+      // ---- Shifts (ცვლები) ----
+      openShift: async (cashierId, cashierName, openingCash) => {
+        const { data, error } = await supabase.rpc('open_shift', {
+          p_cashier_id: cashierId,
+          p_cashier_name: cashierName,
+          p_opening_cash: openingCash,
+        })
+        if (error) {
+          const m = (error as { message?: string }).message ?? ''
+          if (m.includes('SHIFT_ALREADY_OPEN')) toast.error('ცვლა უკვე გახსნილია')
+          else failed(error, 'ცვლის გახსნა ვერ მოხერხდა')
+          return null
+        }
+        const shift = mapShift(data)
+        set((state) => ({ shifts: [shift, ...state.shifts] }))
+        return shift
+      },
+
+      closeShift: async (shiftId, closingCash) => {
+        const { data, error } = await supabase.rpc('close_shift', {
+          p_shift_id: shiftId,
+          p_closing_cash: closingCash,
+        })
+        if (failed(error, 'ცვლის დახურვა ვერ მოხერხდა') || !data) return null
+        const shift = mapShift(data)
+        set((state) => ({ shifts: state.shifts.map((s) => (s.id === shiftId ? shift : s)) }))
+        return shift
       },
 
       // ---- Fiscal result of a sale (called after the device responds) ----
