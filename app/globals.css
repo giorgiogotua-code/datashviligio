@@ -307,3 +307,6 @@
   body > *:not(#receipt-print) { display: none !important; }
   #receipt-print { display: block !important; }
 }
+
+/* PWA safe-area for iPhone notch/home-bar */
+body { padding-bottom: env(safe-area-inset-bottom, 0px); }

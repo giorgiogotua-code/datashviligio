@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from 'react'
-import { Plus, Search, Edit2, Trash2, Package, ScanLine, ChevronLeft, ChevronRight, FileDown, FileUp, Download } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, Package, ScanLine, ChevronLeft, ChevronRight, FileDown, FileUp, Download, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -23,7 +23,7 @@ function StockBadge({ qty }: { qty: number }) {
   return             <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-100">{qty}</span>
 }
 
-export function ProductList({ selectedCategoryId }: { selectedCategoryId: string | null }) {
+export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { selectedCategoryId: string | null; onOpenMobileCategories?: () => void }) {
   const { products, categories, deleteProduct, importProducts } = useStore()
   const [search, setSearch] = useState('')
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -178,6 +178,15 @@ export function ProductList({ selectedCategoryId }: { selectedCategoryId: string
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2.5">
+          {onOpenMobileCategories && (
+            <button
+              onClick={onOpenMobileCategories}
+              className="md:hidden flex items-center gap-1.5 h-8 px-3 rounded-xl bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors"
+            >
+              <Layers className="size-3.5" />
+              კატეგ.
+            </button>
+          )}
           <h2 className="text-base font-bold text-foreground">პროდუქცია</h2>
           <span className="px-2 py-0.5 rounded-lg bg-primary/10 text-primary text-xs font-bold">{filtered.length}</span>
         </div>
