@@ -14,9 +14,9 @@ import { saleAmount, type Sale } from '@/lib/mock-data'
 type Period = 'today' | 'week' | 'month' | 'all'
 type Tab    = 'overview' | 'history' | 'inventory'
 
-function filterByPeriod(sales: Sale[], period: Period) {
+function filterByPeriod<T extends { created_at: string }>(items: T[], period: Period) {
   const now = new Date()
-  return sales.filter(s => {
+  return items.filter(s => {
     const d = new Date(s.created_at)
     if (period === 'today') return d.toDateString() === now.toDateString()
     if (period === 'week') { const start = new Date(now); start.setDate(now.getDate() - 7); return d >= start }
@@ -39,11 +39,12 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 ]
 
 export default function AccountingPage() {
-  const { sales, saleItems } = useStore()
+  const { sales, saleItems, purchases, products } = useStore()
   const [period, setPeriod] = useState<Period>('month')
   const [tab, setTab]       = useState<Tab>('overview')
 
   const filteredSales = useMemo(() => filterByPeriod(sales, period), [sales, period])
+  const filteredPurchases = useMemo(() => filterByPeriod(purchases, period), [purchases, period])
 
   const cashTotal  = filteredSales.filter(s => s.payment_method === 'cash').reduce((s, x) => s + saleAmount(x), 0)
   const cardTotal  = filteredSales.filter(s => s.payment_method === 'card').reduce((s, x) => s + saleAmount(x), 0)
@@ -98,7 +99,7 @@ export default function AccountingPage() {
       {tab === 'overview' && (
         <div className="flex flex-col gap-5">
           <FiscalReports />
-          <KpiCards sales={filteredSales} />
+          <KpiCards sales={filteredSales} saleItems={saleItems} products={products} purchases={filteredPurchases} />
           <SalesChart sales={filteredSales} />
 
           {/* Payment breakdown */}

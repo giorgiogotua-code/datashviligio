@@ -1,11 +1,16 @@
 "use client"
 
 import { useEffect, useRef, useState } from 'react'
-import { TrendingUp, ShoppingBag, DollarSign, Receipt, ArrowUpRight } from 'lucide-react'
+import { TrendingUp, ShoppingBag, DollarSign, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { saleAmount, type Sale } from '@/lib/mock-data'
+import { saleAmount, type Sale, type SaleItem, type Product, type Purchase } from '@/lib/mock-data'
 
-interface Props { sales: Sale[] }
+interface Props {
+  sales: Sale[]
+  saleItems: SaleItem[]
+  products: Product[]
+  purchases: Purchase[]
+}
 
 function useCountUp(target: number, duration = 900) {
   const [value, setValue] = useState(0)
@@ -29,22 +34,21 @@ function useCountUp(target: number, duration = 900) {
 }
 
 function KpiCard({
-  label, rawValue, formatted, sub, icon: Icon,
-  gradient, iconGradient, sparkColor, delay,
+  label, rawValue, monetary, sub, icon: Icon,
+  gradient, iconGradient, valueColor, delay,
 }: {
   label: string
   rawValue: number
-  formatted: string
+  monetary: boolean
   sub: string
   icon: React.ElementType
   gradient: string
   iconGradient: string
-  sparkColor: string
+  valueColor?: string
   delay: number
 }) {
   const animated = useCountUp(rawValue)
-  const isMonetary = formatted.startsWith('₾')
-  const display = isMonetary ? `₾${animated.toFixed(2)}` : String(Math.round(animated))
+  const display = monetary ? `₾${animated.toFixed(2)}` : String(Math.round(animated))
 
   return (
     <div
@@ -67,32 +71,41 @@ function KpiCard({
       </div>
 
       <div className="relative">
-        <p className="text-3xl font-black text-foreground tabular-nums tracking-tight leading-none">
+        <p className={cn('text-3xl font-black tabular-nums tracking-tight leading-none', valueColor ?? 'text-foreground')}>
           {display}
         </p>
-        <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-          <span className={cn('inline-flex items-center gap-0.5 text-xs font-semibold', sparkColor)}>
-            <ArrowUpRight className="size-3" />
-            +12%
-          </span>
-          {sub}
-        </p>
+        <p className="text-xs text-muted-foreground mt-2">{sub}</p>
       </div>
     </div>
   )
 }
 
-export function KpiCards({ sales }: Props) {
-  const total  = sales.reduce((s, x) => s + saleAmount(x), 0) // net of returns
-  const count  = sales.filter(s => s.type === 'sale').length
-  const profit = total * 0.4
-  const avg    = count > 0 ? total / count : 0
+export function KpiCards({ sales, saleItems, products, purchases }: Props) {
+  const total = sales.reduce((s, x) => s + saleAmount(x), 0) // revenue, net of returns
+  const count = sales.filter(s => s.type === 'sale').length
+
+  // Real expense = money spent on purchases (restocking) in this period.
+  const expense = purchases.reduce((s, p) => s + p.total, 0)
+
+  // Real profit = revenue − cost of goods sold (COGS).
+  // COGS uses each sold product's current purchase_price (best estimate).
+  const costOf = (id: string | null) => (id ? products.find(p => p.id === id)?.purchase_price ?? 0 : 0)
+  const saleType = new Map(sales.map(s => [s.id, s.type]))
+  const cogs = saleItems.reduce((s, it) => {
+    const t = saleType.get(it.sale_id)
+    if (!t) return s // item not in the current period
+    const dir = t === 'return' ? -1 : 1
+    return s + dir * costOf(it.product_id) * it.quantity
+  }, 0)
+  const profit = total - cogs
+
+  const avg = count > 0 ? total / count : 0
 
   const cards = [
-    { label: 'შემოსავალი',      rawValue: total,  formatted: `₾${total.toFixed(2)}`,  sub: `${count} გაყიდვა`,      icon: TrendingUp,  gradient: 'from-blue-500 to-indigo-600',   iconGradient: 'from-blue-500 to-indigo-600',   sparkColor: 'text-blue-500',    delay: 0   },
-    { label: 'გაყიდვები',       rawValue: count,  formatted: String(count),            sub: 'დასრულებული',           icon: ShoppingBag, gradient: 'from-violet-500 to-purple-600', iconGradient: 'from-violet-500 to-purple-600', sparkColor: 'text-violet-500',  delay: 60  },
-    { label: 'მოგება (~40%)',   rawValue: profit, formatted: `₾${profit.toFixed(2)}`, sub: 'სავარაუდო',            icon: DollarSign,  gradient: 'from-emerald-500 to-teal-500',  iconGradient: 'from-emerald-500 to-teal-500',  sparkColor: 'text-emerald-500', delay: 120 },
-    { label: 'საშ. ქვითარი',   rawValue: avg,    formatted: `₾${avg.toFixed(2)}`,    sub: 'ერთ გაყიდვაზე',        icon: Receipt,     gradient: 'from-amber-400 to-orange-500',  iconGradient: 'from-amber-400 to-orange-500',  sparkColor: 'text-amber-500',   delay: 180 },
+    { label: 'შემოსავალი',        rawValue: total,   monetary: true, sub: `${count} გაყიდვა`,                icon: TrendingUp,  gradient: 'from-blue-500 to-indigo-600',   iconGradient: 'from-blue-500 to-indigo-600',   delay: 0   },
+    { label: 'ხარჯი (შესყიდვები)', rawValue: expense, monetary: true, sub: 'პროდუქციის შესყიდვაზე',          icon: ShoppingBag, gradient: 'from-rose-500 to-red-600',      iconGradient: 'from-rose-500 to-red-600',      valueColor: 'text-rose-600', delay: 60  },
+    { label: 'მოგება',            rawValue: profit,  monetary: true, sub: 'გაყიდულის თვითღირებულების გამოკლებით', icon: DollarSign,  gradient: 'from-emerald-500 to-teal-500',  iconGradient: 'from-emerald-500 to-teal-500',  valueColor: profit >= 0 ? 'text-emerald-600' : 'text-rose-600', delay: 120 },
+    { label: 'საშ. ქვითარი',     rawValue: avg,     monetary: true, sub: 'ერთ გაყიდვაზე',                   icon: Receipt,     gradient: 'from-amber-400 to-orange-500',  iconGradient: 'from-amber-400 to-orange-500',  delay: 180 },
   ]
 
   return (
