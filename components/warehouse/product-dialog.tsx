@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Barcode, TrendingUp, Loader2 } from 'lucide-react'
+import { Upload, Barcode, TrendingUp, Loader2, Plus, Equal, Package } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,8 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [isCompressing, setIsCompressing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  // When editing: 'add' adds to current stock, 'set' replaces it.
+  const [stockMode, setStockMode] = useState<'add' | 'set'>('add')
   const quantityInputRef = useRef<HTMLInputElement>(null)
 
   const allCats = categories
@@ -57,11 +59,12 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
         barcode: product.barcode ?? '',
         purchase_price: String(product.purchase_price),
         sale_price: String(product.sale_price),
-        quantity: String(product.quantity),
+        quantity: '', // in edit mode this is the amount to add (add mode) — start empty
         major_category_id: major,
         sub_category_id: sub,
         photo_url: product.photo_url ?? '',
       })
+      setStockMode('add')
       setPhotoPreview(product.photo_url ?? '')
     } else {
       setForm({ ...EMPTY, barcode: prefillBarcode ?? '' })
@@ -84,6 +87,14 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
   const sale = parseFloat(form.sale_price) || 0
   const profit = sale - purchase
   const profitPct = purchase > 0 ? Math.round((profit / purchase) * 100) : 0
+
+  // Live preview of the resulting stock for the edit dialog.
+  const enteredQty = parseInt(form.quantity) || 0
+  const resultingStock = !product
+    ? enteredQty
+    : stockMode === 'add'
+      ? Math.max(0, product.quantity + enteredQty)
+      : enteredQty
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -150,13 +161,21 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
         }
       }
 
+      // Quantity: new product = entered; edit + 'add' = current + entered; edit + 'set' = entered.
+      const enteredQty = parseInt(form.quantity) || 0
+      const finalQty = !product
+        ? enteredQty
+        : stockMode === 'add'
+          ? Math.max(0, product.quantity + enteredQty)
+          : enteredQty
+
       const data = {
         name: form.name.trim(),
         barcode: form.barcode || null,
         category_id: finalCategoryId,
         purchase_price: parseFloat(form.purchase_price),
         sale_price: parseFloat(form.sale_price),
-        quantity: parseInt(form.quantity) || 0,
+        quantity: finalQty,
         photo_url: photoUrl,
       }
 
@@ -250,8 +269,55 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
             </div>
 
             <div className="flex flex-col gap-2">
-              <label className="text-[11px] font-black text-muted-foreground uppercase tracking-wider pl-1">მარაგი <span className="text-red-500">*</span></label>
-              <Input ref={quantityInputRef} className="h-12 rounded-2xl bg-white border-border/50 focus-visible:ring-primary/20 shadow-sm" type="number" min="0" value={form.quantity} onChange={f('quantity')} />
+              <label className="text-[11px] font-black text-muted-foreground uppercase tracking-wider pl-1 flex items-center gap-2">
+                მარაგი <span className="text-red-500">*</span>
+                {product && (
+                  <span className="ml-auto inline-flex items-center gap-1 normal-case font-bold text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
+                    <Package className="size-3" /> ახლა: {product.quantity}
+                  </span>
+                )}
+              </label>
+
+              {product ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-stretch gap-1.5">
+                    {/* add / set toggle */}
+                    <div className="flex bg-muted/60 p-0.5 rounded-xl border border-border/50 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => { setStockMode('add'); setForm(p => ({ ...p, quantity: '' })) }}
+                        title="ნაშთს დაამატე"
+                        className={cn('flex items-center gap-1 px-2.5 rounded-lg text-xs font-bold transition-all',
+                          stockMode === 'add' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground')}
+                      >
+                        <Plus className="size-3.5" /> დამატება
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setStockMode('set'); setForm(p => ({ ...p, quantity: String(product.quantity) })) }}
+                        title="ახალი მთლიანი ნაშთი"
+                        className={cn('flex items-center gap-1 px-2.5 rounded-lg text-xs font-bold transition-all',
+                          stockMode === 'set' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground')}
+                      >
+                        <Equal className="size-3.5" /> ახალი
+                      </button>
+                    </div>
+                    <Input
+                      ref={quantityInputRef}
+                      className="h-12 flex-1 rounded-2xl bg-white border-border/50 focus-visible:ring-primary/20 shadow-sm"
+                      type="number" min="0"
+                      placeholder={stockMode === 'add' ? 'დასამატებელი' : 'ახალი მთლიანი'}
+                      value={form.quantity} onChange={f('quantity')}
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground pl-1">
+                    ნაშთი გახდება: <span className="font-black text-primary">{resultingStock}</span>
+                    {stockMode === 'add' && enteredQty > 0 && <span className="text-muted-foreground/70"> ({product.quantity} + {enteredQty})</span>}
+                  </p>
+                </div>
+              ) : (
+                <Input ref={quantityInputRef} className="h-12 rounded-2xl bg-white border-border/50 focus-visible:ring-primary/20 shadow-sm" type="number" min="0" value={form.quantity} onChange={f('quantity')} />
+              )}
             </div>
 
             <div className="flex flex-col gap-2 justify-end pb-1">
