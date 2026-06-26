@@ -35,7 +35,7 @@ type FormData = {
 const EMPTY: FormData = { name: '', barcode: '', purchase_price: '', sale_price: '', quantity: '1', major_category_id: '', sub_category_id: '', photo_url: '' }
 
 export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocusQuantity }: Props) {
-  const { categories, addProduct, updateProduct } = useStore()
+  const { categories, addProduct, updateProduct, products } = useStore()
   const [form, setForm] = useState<FormData>(EMPTY)
   const [photoPreview, setPhotoPreview] = useState<string>('')
   const [photoFile, setPhotoFile] = useState<File | null>(null)
@@ -43,7 +43,13 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
   const [isSaving, setIsSaving] = useState(false)
   // When editing: 'add' adds to current stock, 'set' replaces it.
   const [stockMode, setStockMode] = useState<'add' | 'set'>('add')
+  // In "add new" mode, if the typed barcode matches an existing product we
+  // restock that one instead of creating a duplicate.
+  const [restockTarget, setRestockTarget] = useState<Product | null>(null)
   const quantityInputRef = useRef<HTMLInputElement>(null)
+
+  // The product this dialog is actually saving to (edit OR barcode-matched restock).
+  const target = product ?? restockTarget
 
   const allCats = categories
   const rootCats = categories.filter(c => !c.parent_id)
@@ -70,8 +76,40 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
       setForm({ ...EMPTY, barcode: prefillBarcode ?? '' })
       setPhotoPreview('')
     }
+    setRestockTarget(null)
     setPhotoFile(null)
   }, [product, prefillBarcode, open, allCats])
+
+  // "Add new" mode: if the typed barcode matches an existing product, auto-fill
+  // its details and switch to restocking it (prevents duplicate products).
+  useEffect(() => {
+    if (product) return // real edit mode — not applicable
+    const code = form.barcode.trim()
+    const match = code ? products.find(p => p.barcode === code) : undefined
+
+    if (match && match.id !== restockTarget?.id) {
+      const cat = allCats.find(c => c.id === match.category_id)
+      const major = cat?.parent_id ? cat.parent_id : (cat?.id || '')
+      const sub = cat?.parent_id ? cat.id : ''
+      setRestockTarget(match)
+      setStockMode('add')
+      setForm(f => ({
+        ...f,
+        name: match.name,
+        purchase_price: String(match.purchase_price),
+        sale_price: String(match.sale_price),
+        quantity: '', // becomes the amount to add
+        major_category_id: major,
+        sub_category_id: sub,
+        photo_url: match.photo_url ?? '',
+      }))
+      setPhotoPreview(match.photo_url ?? '')
+      setPhotoFile(null)
+    } else if (!match && restockTarget) {
+      // barcode changed away from the match — back to a plain new product
+      setRestockTarget(null)
+    }
+  }, [form.barcode, product, products, allCats, restockTarget])
 
   useEffect(() => {
     // Auto-focus quantity input if requested
@@ -88,12 +126,12 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
   const profit = sale - purchase
   const profitPct = purchase > 0 ? Math.round((profit / purchase) * 100) : 0
 
-  // Live preview of the resulting stock for the edit dialog.
+  // Live preview of the resulting stock for the edit/restock dialog.
   const enteredQty = parseInt(form.quantity) || 0
-  const resultingStock = !product
+  const resultingStock = !target
     ? enteredQty
     : stockMode === 'add'
-      ? Math.max(0, product.quantity + enteredQty)
+      ? Math.max(0, target.quantity + enteredQty)
       : enteredQty
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -144,6 +182,13 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
     if (!form.major_category_id) { toast.error('მთავარი კატეგორია სავალდებულოა'); return }
     if (!form.purchase_price || !form.sale_price) { toast.error('ფასები სავალდებულოა'); return }
 
+    // Safety net: don't create a duplicate of an existing barcode.
+    const code = form.barcode.trim()
+    if (!target && code) {
+      const dup = products.find(p => p.barcode === code)
+      if (dup) { toast.error(`ეს შტრიხკოდი უკვე აქვს: ${dup.name} — გამოიყენე ნაშთის შევსება`); return }
+    }
+
     const finalCategoryId = form.sub_category_id || form.major_category_id
 
     setIsSaving(true)
@@ -161,13 +206,13 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
         }
       }
 
-      // Quantity: new product = entered; edit + 'add' = current + entered; edit + 'set' = entered.
-      const enteredQty = parseInt(form.quantity) || 0
-      const finalQty = !product
-        ? enteredQty
+      // Quantity: new product = entered; edit/restock + 'add' = current + entered; 'set' = entered.
+      const enteredQtyVal = parseInt(form.quantity) || 0
+      const finalQty = !target
+        ? enteredQtyVal
         : stockMode === 'add'
-          ? Math.max(0, product.quantity + enteredQty)
-          : enteredQty
+          ? Math.max(0, target.quantity + enteredQtyVal)
+          : enteredQtyVal
 
       const data = {
         name: form.name.trim(),
@@ -179,9 +224,9 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
         photo_url: photoUrl,
       }
 
-      if (product) {
-        await updateProduct(product.id, data)
-        toast.success('პროდუქტი განახლდა')
+      if (target) {
+        await updateProduct(target.id, data)
+        toast.success(restockTarget ? 'ნაშთი შეივსო' : 'პროდუქტი განახლდა')
       } else {
         await addProduct(data)
         toast.success('პროდუქტი დაემატა')
@@ -199,8 +244,20 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[760px] w-full rounded-[32px] p-7 md:p-9 border-white/50 shadow-2xl bg-slate-50/95 backdrop-blur-3xl">
         <DialogHeader className="mb-2">
-          <DialogTitle className="text-2xl font-black text-foreground">{product ? 'პროდუქტის რედაქტირება' : 'ახალი პროდუქტის დამატება'}</DialogTitle>
+          <DialogTitle className="text-2xl font-black text-foreground">
+            {product ? 'პროდუქტის რედაქტირება' : restockTarget ? 'ნაშთის შევსება' : 'ახალი პროდუქტის დამატება'}
+          </DialogTitle>
         </DialogHeader>
+
+        {/* Barcode matched an existing product → restocking it, not creating a duplicate */}
+        {restockTarget && (
+          <div className="flex items-center gap-2.5 -mt-1 mb-1 px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800">
+            <Package className="size-4 shrink-0" />
+            <p className="text-[13px] font-semibold">
+              ეს შტრიხკოდი უკვე არსებობს — <strong>{restockTarget.name}</strong>. ვავსებთ ნაშთს (ნაცვლად დუბლიკატისა).
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-col gap-8 py-2">
           {/* Top part — fields */}
@@ -271,14 +328,14 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
             <div className="flex flex-col gap-2">
               <label className="text-[11px] font-black text-muted-foreground uppercase tracking-wider pl-1 flex items-center gap-2">
                 მარაგი <span className="text-red-500">*</span>
-                {product && (
+                {target && (
                   <span className="ml-auto inline-flex items-center gap-1 normal-case font-bold text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
-                    <Package className="size-3" /> ახლა: {product.quantity}
+                    <Package className="size-3" /> ახლა: {target.quantity}
                   </span>
                 )}
               </label>
 
-              {product ? (
+              {target ? (
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-stretch gap-1.5">
                     {/* add / set toggle */}
@@ -294,7 +351,7 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
                       </button>
                       <button
                         type="button"
-                        onClick={() => { setStockMode('set'); setForm(p => ({ ...p, quantity: String(product.quantity) })) }}
+                        onClick={() => { setStockMode('set'); setForm(p => ({ ...p, quantity: String(target.quantity) })) }}
                         title="ახალი მთლიანი ნაშთი"
                         className={cn('flex items-center gap-1 px-2.5 rounded-lg text-xs font-bold transition-all',
                           stockMode === 'set' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground')}
@@ -312,7 +369,7 @@ export function ProductDialog({ open, onClose, product, prefillBarcode, autoFocu
                   </div>
                   <p className="text-[11px] text-muted-foreground pl-1">
                     ნაშთი გახდება: <span className="font-black text-primary">{resultingStock}</span>
-                    {stockMode === 'add' && enteredQty > 0 && <span className="text-muted-foreground/70"> ({product.quantity} + {enteredQty})</span>}
+                    {stockMode === 'add' && enteredQty > 0 && <span className="text-muted-foreground/70"> ({target.quantity} + {enteredQty})</span>}
                   </p>
                 </div>
               ) : (
