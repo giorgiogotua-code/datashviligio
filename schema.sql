@@ -91,6 +91,8 @@ CREATE TABLE shifts (
   credit_paid   DECIMAL(10, 2) NOT NULL DEFAULT 0,
   returns_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
   sales_count   INTEGER NOT NULL DEFAULT 0,
+  customer_payments_cash DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- cash debt repayments during the shift (+)
+  supplier_payments_cash DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- cash paid to suppliers during the shift (−)
   expected_cash DECIMAL(10, 2) NOT NULL DEFAULT 0,
   difference    DECIMAL(10, 2) NOT NULL DEFAULT 0,
   opened_at     TIMESTAMPTZ DEFAULT NOW(),
@@ -158,8 +160,11 @@ CREATE TABLE customer_payments (
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
   amount      DECIMAL(10, 2) NOT NULL,
   note        TEXT,
+  shift_id    UUID REFERENCES shifts(id) ON DELETE SET NULL,
+  method      TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash','card','transfer')),
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX idx_customer_payments_shift ON customer_payments(shift_id);
 CREATE INDEX idx_customer_payments_customer ON customer_payments(customer_id);
 CREATE INDEX idx_sales_customer ON sales(customer_id);
 CREATE INDEX idx_sales_shift    ON sales(shift_id);
@@ -224,9 +229,12 @@ CREATE TABLE supplier_payments (
   supplier_id UUID REFERENCES suppliers(id) ON DELETE CASCADE,
   amount      DECIMAL(10, 2) NOT NULL,
   note        TEXT,
+  shift_id    UUID REFERENCES shifts(id) ON DELETE SET NULL,
+  method      TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash','card','transfer')),
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_supplier_payments_supplier ON supplier_payments(supplier_id);
+CREATE INDEX idx_supplier_payments_shift ON supplier_payments(shift_id);
 
 INSERT INTO settings (key, value) VALUES
   ('companyName', 'AccessoryShop'),
@@ -381,7 +389,9 @@ $$;
 CREATE OR REPLACE FUNCTION pay_customer(
   p_customer_id UUID,
   p_amount      NUMERIC,
-  p_note        TEXT DEFAULT NULL
+  p_note        TEXT DEFAULT NULL,
+  p_shift_id    UUID DEFAULT NULL,
+  p_method      TEXT DEFAULT 'cash'
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -390,8 +400,8 @@ DECLARE
   v_payment customer_payments;
   v_customer customers;
 BEGIN
-  INSERT INTO customer_payments(customer_id, amount, note)
-  VALUES (p_customer_id, p_amount, p_note)
+  INSERT INTO customer_payments(customer_id, amount, note, shift_id, method)
+  VALUES (p_customer_id, p_amount, p_note, p_shift_id, COALESCE(p_method,'cash'))
   RETURNING * INTO v_payment;
 
   UPDATE customers SET balance = balance - p_amount
@@ -425,6 +435,7 @@ DECLARE
   v_shift shifts;
   v_cash NUMERIC; v_card NUMERIC; v_credit NUMERIC; v_credit_paid NUMERIC;
   v_returns NUMERIC; v_cash_returns NUMERIC; v_count INTEGER; v_expected NUMERIC; v_open_cash NUMERIC;
+  v_cust_cash NUMERIC; v_supp_cash NUMERIC;
 BEGIN
   SELECT opening_cash INTO v_open_cash FROM shifts WHERE id = p_shift_id;
   SELECT
@@ -438,13 +449,17 @@ BEGIN
   INTO v_cash, v_card, v_credit, v_credit_paid, v_returns, v_cash_returns, v_count
   FROM sales WHERE shift_id = p_shift_id;
 
-  v_expected := COALESCE(v_open_cash,0) + v_cash + v_credit_paid - v_cash_returns;
+  SELECT COALESCE(SUM(amount),0) INTO v_cust_cash FROM customer_payments WHERE shift_id = p_shift_id AND method='cash';
+  SELECT COALESCE(SUM(amount),0) INTO v_supp_cash FROM supplier_payments WHERE shift_id = p_shift_id AND method='cash';
+
+  v_expected := COALESCE(v_open_cash,0) + v_cash + v_credit_paid + v_cust_cash - v_cash_returns - v_supp_cash;
 
   UPDATE shifts SET
     status='closed', closed_at=NOW(), closing_cash=COALESCE(p_closing_cash,0),
     cash_sales=v_cash, card_sales=v_card, credit_sales=v_credit, credit_paid=v_credit_paid,
-    returns_total=v_returns, sales_count=v_count, expected_cash=v_expected,
-    difference=COALESCE(p_closing_cash,0) - v_expected
+    returns_total=v_returns, sales_count=v_count,
+    customer_payments_cash=v_cust_cash, supplier_payments_cash=v_supp_cash,
+    expected_cash=v_expected, difference=COALESCE(p_closing_cash,0) - v_expected
   WHERE id = p_shift_id
   RETURNING * INTO v_shift;
   RETURN to_jsonb(v_shift);
@@ -509,7 +524,9 @@ $$;
 CREATE OR REPLACE FUNCTION pay_supplier(
   p_supplier_id UUID,
   p_amount      NUMERIC,
-  p_note        TEXT DEFAULT NULL
+  p_note        TEXT DEFAULT NULL,
+  p_shift_id    UUID DEFAULT NULL,
+  p_method      TEXT DEFAULT 'cash'
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -518,8 +535,8 @@ DECLARE
   v_payment supplier_payments;
   v_supplier suppliers;
 BEGIN
-  INSERT INTO supplier_payments(supplier_id, amount, note)
-  VALUES (p_supplier_id, p_amount, p_note)
+  INSERT INTO supplier_payments(supplier_id, amount, note, shift_id, method)
+  VALUES (p_supplier_id, p_amount, p_note, p_shift_id, COALESCE(p_method,'cash'))
   RETURNING * INTO v_payment;
 
   UPDATE suppliers SET balance = balance - p_amount

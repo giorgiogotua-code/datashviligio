@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/lib/store'
 import { toast } from 'sonner'
-import type { Customer } from '@/lib/mock-data'
+import { MethodPicker } from '@/components/payments/method-picker'
+import type { Customer, PayMethod } from '@/lib/mock-data'
 
 interface Props {
   open: boolean
@@ -19,11 +20,12 @@ export function CustomerPaymentDialog({ open, onClose, customer }: Props) {
   const { payCustomer } = useStore()
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
+  const [method, setMethod] = useState<PayMethod>('cash')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open && customer) setAmount(customer.balance > 0 ? String(customer.balance.toFixed(2)) : '')
-    setNote('')
+    setNote(''); setMethod('cash')
   }, [open, customer])
 
   if (!customer) return null
@@ -33,7 +35,7 @@ export function CustomerPaymentDialog({ open, onClose, customer }: Props) {
   const handlePay = async () => {
     if (value <= 0) { toast.error('შეიყვანეთ თანხა'); return }
     setSaving(true)
-    await payCustomer(customer.id, value, note.trim() || null)
+    await payCustomer(customer.id, value, note.trim() || null, method)
     toast.success(`გადახდა მიღებულია: ₾${value.toFixed(2)}`)
     setSaving(false)
     onClose()
@@ -59,6 +61,7 @@ export function CustomerPaymentDialog({ open, onClose, customer }: Props) {
               <Input type="number" min="0" inputMode="decimal" className="h-12 pl-9 rounded-xl text-lg font-bold" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} />
             </div>
           </div>
+          <MethodPicker value={method} onChange={setMethod} />
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide pl-1">შენიშვნა</label>
             <div className="relative">

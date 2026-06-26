@@ -19,6 +19,7 @@ import {
   type CustomerPayment,
   type Cashier,
   type Shift,
+  type PayMethod,
 } from './mock-data'
 
 const supabase = createClient()
@@ -89,12 +90,12 @@ export interface StoreState {
     purchase: { supplier_id: string | null; supplier_name: string | null; total: number; paid: number; items_count: number; note: string | null },
     items: Omit<PurchaseItem, 'id' | 'purchase_id'>[]
   ) => Promise<Purchase | null>
-  paySupplier: (supplierId: string, amount: number, note?: string | null) => Promise<void>
+  paySupplier: (supplierId: string, amount: number, note?: string | null, method?: PayMethod) => Promise<void>
   // Customers & credit (ნისია)
   addCustomer: (c: Pick<Customer, 'name' | 'phone' | 'note'>) => Promise<Customer | null>
   updateCustomer: (id: string, c: Partial<Customer>) => Promise<void>
   deleteCustomer: (id: string) => Promise<void>
-  payCustomer: (customerId: string, amount: number, note?: string | null) => Promise<void>
+  payCustomer: (customerId: string, amount: number, note?: string | null, method?: PayMethod) => Promise<void>
   // Cashiers & shifts (ცვლები)
   addCashier: (c: Pick<Cashier, 'name' | 'pin'>) => Promise<Cashier | null>
   updateCashier: (id: string, c: Partial<Cashier>) => Promise<void>
@@ -218,6 +219,8 @@ function mapSupplierPayment(r: any): SupplierPayment {
     supplier_id: r.supplier_id,
     amount: num(r.amount),
     note: r.note ?? null,
+    method: r.method ?? 'cash',
+    shift_id: r.shift_id ?? null,
     created_at: r.created_at,
   }
 }
@@ -239,6 +242,8 @@ function mapCustomerPayment(r: any): CustomerPayment {
     customer_id: r.customer_id,
     amount: num(r.amount),
     note: r.note ?? null,
+    method: r.method ?? 'cash',
+    shift_id: r.shift_id ?? null,
     created_at: r.created_at,
   }
 }
@@ -267,6 +272,8 @@ function mapShift(r: any): Shift {
     credit_paid: num(r.credit_paid),
     returns_total: num(r.returns_total),
     sales_count: num(r.sales_count),
+    customer_payments_cash: num(r.customer_payments_cash),
+    supplier_payments_cash: num(r.supplier_payments_cash),
     expected_cash: num(r.expected_cash),
     difference: num(r.difference),
     opened_at: r.opened_at,
@@ -670,11 +677,14 @@ export const useStore = create<StoreState>()(
         return newPurchase
       },
 
-      paySupplier: async (supplierId, amount, note) => {
+      paySupplier: async (supplierId, amount, note, method = 'cash') => {
+        const openShiftRow = get().shifts.find((s) => s.status === 'open')
         const { data, error } = await supabase.rpc('pay_supplier', {
           p_supplier_id: supplierId,
           p_amount: amount,
           p_note: note ?? null,
+          p_shift_id: openShiftRow?.id ?? null,
+          p_method: method,
         })
         if (failed(error, 'გადახდის შენახვა ვერ მოხერხდა') || !data) return
         const payment = mapSupplierPayment((data as any).payment)
@@ -710,11 +720,14 @@ export const useStore = create<StoreState>()(
         set((state) => ({ customers: state.customers.filter((x) => x.id !== id) }))
       },
 
-      payCustomer: async (customerId, amount, note) => {
+      payCustomer: async (customerId, amount, note, method = 'cash') => {
+        const openShiftRow = get().shifts.find((s) => s.status === 'open')
         const { data, error } = await supabase.rpc('pay_customer', {
           p_customer_id: customerId,
           p_amount: amount,
           p_note: note ?? null,
+          p_shift_id: openShiftRow?.id ?? null,
+          p_method: method,
         })
         if (failed(error, 'გადახდის შენახვა ვერ მოხერხდა') || !data) return
         const payment = mapCustomerPayment((data as any).payment)

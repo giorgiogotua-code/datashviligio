@@ -27,14 +27,14 @@ function Row({ label, value, strong, color }: { label: string; value: string; st
 }
 
 export function CloseShiftDialog({ open, onClose, shift }: Props) {
-  const { sales, closeShift } = useStore()
+  const { sales, closeShift, customerPayments, supplierPayments } = useStore()
   const [countedCash, setCountedCash] = useState('')
   const [saving, setSaving] = useState(false)
   const [report, setReport] = useState<Shift | null>(null)
 
   useEffect(() => { if (open) { setCountedCash(''); setReport(null) } }, [open])
 
-  // Live preview from this shift's sales.
+  // Live preview from this shift's sales + cash payments.
   const preview = useMemo(() => {
     if (!shift) return null
     const ss = sales.filter(s => s.shift_id === shift.id)
@@ -47,9 +47,12 @@ export function CloseShiftDialog({ open, onClose, shift }: Props) {
     const returns = sum(s => s.type === 'return')
     const cashReturns = sum(s => s.type === 'return' && s.payment_method === 'cash')
     const count = ss.filter(s => s.type === 'sale').length
-    const expected = shift.opening_cash + cash + creditPaid - cashReturns
-    return { cash, card, credit, creditPaid, returns, count, expected }
-  }, [sales, shift])
+    // Cash debt repayments (in) and cash supplier payments (out) during this shift.
+    const custCash = customerPayments.filter(p => p.shift_id === shift.id && p.method === 'cash').reduce((a, p) => a + p.amount, 0)
+    const suppCash = supplierPayments.filter(p => p.shift_id === shift.id && p.method === 'cash').reduce((a, p) => a + p.amount, 0)
+    const expected = shift.opening_cash + cash + creditPaid + custCash - cashReturns - suppCash
+    return { cash, card, credit, creditPaid, returns, count, custCash, suppCash, expected }
+  }, [sales, shift, customerPayments, supplierPayments])
 
   if (!shift) return null
 
@@ -96,6 +99,12 @@ export function CloseShiftDialog({ open, onClose, shift }: Props) {
 
           {/* Cash reconciliation */}
           <div className="bg-gradient-to-br from-primary/5 to-indigo-50/50 rounded-2xl p-4 flex flex-col gap-2 border border-primary/10">
+            {(r ? r.customer_payments_cash : preview!.custCash) > 0 && (
+              <Row label="ვალის გადახდები (ნაღდი)" value={`+₾${(r ? r.customer_payments_cash : preview!.custCash).toFixed(2)}`} color="text-emerald-600" />
+            )}
+            {(r ? r.supplier_payments_cash : preview!.suppCash) > 0 && (
+              <Row label="მომწოდებლის გადახდა (ნაღდი)" value={`−₾${(r ? r.supplier_payments_cash : preview!.suppCash).toFixed(2)}`} color="text-red-600" />
+            )}
             <Row label="მოსალოდნელი კასა" value={`₾${(r ? r.expected_cash : preview!.expected).toFixed(2)}`} strong color="text-primary" />
             {!report ? (
               <div className="flex flex-col gap-1.5">

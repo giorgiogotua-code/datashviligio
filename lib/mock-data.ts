@@ -106,6 +106,8 @@ export type SupplierPayment = {
   supplier_id: string
   amount: number
   note: string | null
+  method: PayMethod
+  shift_id: string | null
   created_at: string
 }
 
@@ -119,11 +121,15 @@ export type Customer = {
   created_at: string
 }
 
+export type PayMethod = 'cash' | 'card' | 'transfer'
+
 export type CustomerPayment = {
   id: string
   customer_id: string
   amount: number
   note: string | null
+  method: PayMethod
+  shift_id: string | null
   created_at: string
 }
 
@@ -149,6 +155,8 @@ export type Shift = {
   credit_paid: number
   returns_total: number
   sales_count: number
+  customer_payments_cash: number
+  supplier_payments_cash: number
   expected_cash: number
   difference: number
   opened_at: string
