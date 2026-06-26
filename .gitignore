@@ -21,3 +21,6 @@ node_modules
 .open-next/
 .wrangler/
 .dev.vars
+
+# MCP config (may contain a Supabase access token — never commit)
+.mcp.json
