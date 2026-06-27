@@ -41,6 +41,8 @@ CREATE TABLE organizations (
   plan                TEXT NOT NULL DEFAULT 'trial'  CHECK (plan   IN ('trial','pro','enterprise')),
   status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
   trial_ends_at       TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
+  upgrade_requested    BOOLEAN NOT NULL DEFAULT false,   -- shop asked to upgrade (manual billing)
+  upgrade_requested_at TIMESTAMPTZ,
   billing_customer_id TEXT,          -- Phase 3 (billing) placeholders
   subscription_status TEXT,
   created_at          TIMESTAMPTZ DEFAULT NOW()
@@ -72,9 +74,15 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
   SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = auth.uid());
 $$;
 
+-- Active = not manually suspended AND (not a trial, or trial within its
+-- 3-day grace). Trial expiry therefore blocks writes without a cron job.
 CREATE OR REPLACE FUNCTION current_org_active() RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
-  SELECT COALESCE((SELECT status = 'active' FROM organizations WHERE id = auth_org()), false);
+  SELECT COALESCE((
+    SELECT o.status = 'active'
+       AND (o.plan <> 'trial' OR o.trial_ends_at IS NULL OR now() < o.trial_ends_at + INTERVAL '3 days')
+    FROM organizations o WHERE o.id = auth_org()
+  ), false);
 $$;
 
 REVOKE EXECUTE ON FUNCTION auth_org()          FROM PUBLIC, anon;
@@ -431,7 +439,8 @@ CREATE OR REPLACE FUNCTION platform_org_overview()
 RETURNS TABLE (
   id UUID, name TEXT, plan TEXT, status TEXT,
   trial_ends_at TIMESTAMPTZ, created_at TIMESTAMPTZ,
-  members BIGINT, products BIGINT, sales BIGINT
+  members BIGINT, products BIGINT, sales BIGINT,
+  upgrade_requested BOOLEAN
 )
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, auth
 AS $$
@@ -443,13 +452,49 @@ BEGIN
     SELECT o.id, o.name, o.plan, o.status, o.trial_ends_at, o.created_at,
            (SELECT count(*) FROM memberships m WHERE m.org_id = o.id),
            (SELECT count(*) FROM products    p WHERE p.org_id = o.id),
-           (SELECT count(*) FROM sales       s WHERE s.org_id = o.id AND s.type = 'sale')
+           (SELECT count(*) FROM sales       s WHERE s.org_id = o.id AND s.type = 'sale'),
+           o.upgrade_requested
     FROM organizations o
-    ORDER BY o.created_at DESC;
+    ORDER BY o.upgrade_requested DESC, o.created_at DESC;
 END;
 $$;
 REVOKE EXECUTE ON FUNCTION platform_org_overview() FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION platform_org_overview() TO authenticated;
+
+-- ============================================================
+--  BILLING (manual MVP) — product limits + upgrade requests.
+-- ============================================================
+-- Trial plans are capped at 50 products; paid plans are unlimited.
+CREATE OR REPLACE FUNCTION enforce_product_limit() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE
+  v_plan  TEXT;
+  v_count INTEGER;
+BEGIN
+  SELECT plan INTO v_plan FROM organizations WHERE id = NEW.org_id;
+  IF v_plan = 'trial' THEN
+    SELECT count(*) INTO v_count FROM products WHERE org_id = NEW.org_id;
+    IF v_count >= 50 THEN
+      RAISE EXCEPTION 'PRODUCT_LIMIT_REACHED:50' USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS trg_enforce_product_limit ON products;
+CREATE TRIGGER trg_enforce_product_limit
+  BEFORE INSERT ON products
+  FOR EACH ROW EXECUTE FUNCTION enforce_product_limit();
+
+-- A shop owner flags that they want to upgrade (manual billing follow-up).
+CREATE OR REPLACE FUNCTION request_upgrade() RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = public, auth AS $$
+  UPDATE organizations
+     SET upgrade_requested = true, upgrade_requested_at = now()
+   WHERE id = auth_org();
+$$;
+REVOKE EXECUTE ON FUNCTION request_upgrade() FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION request_upgrade() TO authenticated;
 
 -- ============================================================
 --  ATOMIC SALE — sale + line items + stock in one transaction.

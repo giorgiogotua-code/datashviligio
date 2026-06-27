@@ -59,6 +59,7 @@ export interface StoreState {
   setDesktopSidebarCollapsed: (collapsed: boolean) => void
   updateSettings: (s: Partial<Settings>) => Promise<void>
   setPin: (pin: string) => Promise<void>
+  requestUpgrade: () => Promise<void>
   lock: () => void
   unlock: (pin: string) => boolean
   addCategory: (cat: Omit<Category, 'id' | 'created_at'>) => Promise<void>
@@ -130,6 +131,14 @@ export interface CurrentOrg {
   plan: OrgPlan
   status: OrgStatus
   trial_ends_at: string | null
+  upgrade_requested: boolean
+}
+
+// Product cap per plan (trial is limited; paid plans are unlimited).
+export const PRODUCT_LIMITS: Record<OrgPlan, number> = {
+  trial: 50,
+  pro: Infinity,
+  enterprise: Infinity,
 }
 
 // ---- Row mappers: Postgres numeric/decimal can arrive as strings, so coerce. ----
@@ -324,6 +333,11 @@ function failed(error: unknown, msg: string): boolean {
   return false
 }
 
+// The product-limit trigger raises PRODUCT_LIMIT_REACHED on trial plans.
+function isProductLimit(error: unknown): boolean {
+  return String((error as any)?.message ?? '').includes('PRODUCT_LIMIT_REACHED')
+}
+
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
@@ -395,7 +409,7 @@ export const useStore = create<StoreState>()(
 
         // Tenant (organization) + platform-admin role for this user.
         const [orgRow, adminRow] = await Promise.all([
-          supabase.from('memberships').select('org_id, organizations(id,name,plan,status,trial_ends_at)').maybeSingle(),
+          supabase.from('memberships').select('org_id, organizations(id,name,plan,status,trial_ends_at,upgrade_requested)').maybeSingle(),
           supabase.from('platform_admins').select('user_id').maybeSingle(),
         ])
         const orgData: any = (orgRow.data as any)?.organizations ?? null
@@ -405,6 +419,7 @@ export const useStore = create<StoreState>()(
           plan: orgData.plan,
           status: orgData.status,
           trial_ends_at: orgData.trial_ends_at ?? null,
+          upgrade_requested: !!orgData.upgrade_requested,
         } : null
         const isPlatformAdmin = !!adminRow.data
 
@@ -467,6 +482,14 @@ export const useStore = create<StoreState>()(
         if (failed(error, 'PIN-ის შენახვა ვერ მოხერხდა')) set({ pin: prev })
       },
 
+      // Owner asks the platform to upgrade their plan (manual billing).
+      requestUpgrade: async () => {
+        const { error } = await supabase.rpc('request_upgrade')
+        if (failed(error, 'მოთხოვნა ვერ გაიგზავნა')) return
+        set((s) => ({ currentOrg: s.currentOrg ? { ...s.currentOrg, upgrade_requested: true } : s.currentOrg }))
+        toast.success('განახლების მოთხოვნა გაიგზავნა — მალე დაგიკავშირდებით')
+      },
+
       // ---- Categories ----
       addCategory: async (cat) => {
         const { data, error } = await supabase
@@ -515,14 +538,26 @@ export const useStore = create<StoreState>()(
       // ---- Products ----
       addProduct: async (p) => {
         const { data, error } = await supabase.from('products').insert(sanitizeProductWrite(p)).select().single()
-        if (failed(error, 'პროდუქტის დამატება ვერ მოხერხდა') || !data) return
+        if (error) {
+          if (isProductLimit(error)) toast.error('საცდელ გეგმაზე მაქს. 50 პროდუქტია — განაახლე Pro-ზე მეტისთვის')
+          else toast.error('პროდუქტის დამატება ვერ მოხერხდა')
+          console.error('addProduct', error)
+          return
+        }
+        if (!data) return
         set((state) => ({ products: [mapProduct(data), ...state.products] }))
       },
 
       importProducts: async (products) => {
         if (products.length === 0) return
         const { data, error } = await supabase.from('products').insert(products.map(sanitizeProductWrite)).select()
-        if (failed(error, 'პროდუქტების იმპორტი ვერ მოხერხდა') || !data) return
+        if (error) {
+          if (isProductLimit(error)) toast.error('საცდელ გეგმაზე მაქს. 50 პროდუქტი — განაახლე Pro-ზე იმპორტისთვის')
+          else toast.error('პროდუქტების იმპორტი ვერ მოხერხდა')
+          console.error('importProducts', error)
+          return
+        }
+        if (!data) return
         set((state) => ({ products: [...data.map(mapProduct), ...state.products] }))
       },
 

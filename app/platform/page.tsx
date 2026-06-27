@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Shield, Loader2, Users, Package, Receipt, Ban, Play, LogOut, Building2, ArrowLeft } from 'lucide-react'
+import { Shield, Loader2, Users, Package, Receipt, Ban, Play, LogOut, Building2, ArrowLeft, Bell } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 
@@ -17,6 +17,7 @@ type Org = {
   members: number
   products: number
   sales: number
+  upgrade_requested: boolean
 }
 
 const PLANS: Org['plan'][] = ['trial', 'pro', 'enterprise']
@@ -50,8 +51,9 @@ export default function PlatformPage() {
 
   const changePlan = async (id: string, plan: Org['plan']) => {
     setBusy(id)
-    setOrgs((prev) => prev.map((o) => (o.id === id ? { ...o, plan } : o)))
-    const { error } = await supabase.from('organizations').update({ plan }).eq('id', id)
+    // Changing the plan also clears any pending upgrade request.
+    setOrgs((prev) => prev.map((o) => (o.id === id ? { ...o, plan, upgrade_requested: false } : o)))
+    const { error } = await supabase.from('organizations').update({ plan, upgrade_requested: false }).eq('id', id)
     setBusy(null)
     if (error) { toast.error('გეგმის შეცვლა ვერ მოხერხდა'); load(); return }
     toast.success('გეგმა განახლდა')
@@ -165,12 +167,20 @@ export default function PlatformPage() {
                   {org.status === 'suspended' && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/15 text-red-300 border border-red-500/30">შეჩერებული</span>
                   )}
+                  {org.upgrade_requested && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 animate-pulse">
+                      <Bell className="size-3" /> განახლების მოთხოვნა
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 mt-2 text-[12px] text-slate-400">
                   <span className="flex items-center gap-1"><Users className="size-3.5" /> {org.members}</span>
                   <span className="flex items-center gap-1"><Package className="size-3.5" /> {org.products}</span>
                   <span className="flex items-center gap-1"><Receipt className="size-3.5" /> {org.sales}</span>
-                  <span className="hidden sm:inline">· {new Date(org.created_at).toLocaleDateString('ka-GE')}</span>
+                  {org.plan === 'trial' && org.trial_ends_at && (
+                    <span className="hidden sm:inline">· trial: {new Date(org.trial_ends_at).toLocaleDateString('ka-GE')}</span>
+                  )}
+                  <span className="hidden md:inline">· {new Date(org.created_at).toLocaleDateString('ka-GE')}</span>
                 </div>
               </div>
 

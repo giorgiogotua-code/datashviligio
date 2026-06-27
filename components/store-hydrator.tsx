@@ -37,9 +37,17 @@ export function StoreHydrator({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // A suspended tenant is frozen out of the app (RLS also blocks all writes).
+  // A tenant is frozen (read-only, RLS blocks writes) when manually
+  // suspended OR when a trial has been expired past its 3-day grace.
   // Platform admins are exempt so they can still operate.
-  if (currentOrg?.status === 'suspended' && !isPlatformAdmin) {
+  const DAY = 86_400_000
+  const trialLocked =
+    currentOrg?.plan === 'trial' && currentOrg.trial_ends_at
+      ? Date.now() > new Date(currentOrg.trial_ends_at).getTime() + 3 * DAY
+      : false
+  const locked = currentOrg?.status === 'suspended' || trialLocked
+
+  if (locked && !isPlatformAdmin) {
     const signOut = async () => {
       await createClient().auth.signOut()
       window.location.href = '/login'
@@ -50,9 +58,13 @@ export function StoreHydrator({ children }: { children: React.ReactNode }) {
           <ShieldAlert className="size-8 text-white" />
         </div>
         <div className="max-w-md flex flex-col gap-2">
-          <h1 className="text-xl font-black text-foreground">ანგარიში შეჩერებულია</h1>
+          <h1 className="text-xl font-black text-foreground">
+            {trialLocked ? 'საცდელი პერიოდი დასრულდა' : 'ანგარიში შეჩერებულია'}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            თქვენი მაღაზიის წვდომა დროებით შეჩერებულია. დეტალებისთვის დაუკავშირდით ადმინისტრაციას.
+            {trialLocked
+              ? 'საცდელი პერიოდი ამოიწურა. წვდომის გასაგრძელებლად განაახლეთ Pro-ზე — დაუკავშირდით ადმინისტრაციას.'
+              : 'თქვენი მაღაზიის წვდომა დროებით შეჩერებულია. დეტალებისთვის დაუკავშირდით ადმინისტრაციას.'}
           </p>
         </div>
         <button
