@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Package, ShoppingCart, BarChart2, Smartphone, Zap, Settings, Lock, X, Wrench, Menu, Truck, BookOpen, HandCoins, Users } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { useEffect } from 'react'
@@ -114,17 +115,25 @@ function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, 
               )}
             >
               {active && (
-                <span className={cn('absolute inset-0 rounded-2xl bg-gradient-to-r opacity-100', color)} />
+                <motion.span
+                  layoutId="sidebarActive"
+                  className={cn('absolute inset-0 rounded-2xl bg-gradient-to-r opacity-100 -z-10', color)}
+                  transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                />
               )}
               <span className={cn(
-                'relative size-8 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200',
+                'relative z-10 size-8 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200',
                 active ? 'bg-white/20' : 'bg-muted group-hover:bg-white group-hover:shadow-sm'
               )}>
-                <Icon className={cn('size-4', active ? 'text-white' : 'text-muted-foreground group-hover:text-primary')} />
+                <Icon className={cn('relative z-10 size-4', active ? 'text-white' : 'text-muted-foreground group-hover:text-primary')} />
               </span>
-              {!collapsed && <span className="relative">{label}</span>}
+              {!collapsed && <span className="relative z-10">{label}</span>}
               {active && !collapsed && (
-                <span className="relative ml-auto size-1.5 rounded-full bg-white/70" />
+                <motion.span 
+                  initial={{ scale: 0 }} 
+                  animate={{ scale: 1 }} 
+                  className="relative z-10 ml-auto size-1.5 rounded-full bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.8)]" 
+                />
               )}
             </Link>
           )
@@ -178,33 +187,49 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Desktop — always visible */}
-      <div className={cn("hidden md:flex shrink-0 floating-panel rounded-3xl h-full transition-all duration-300", isDesktopSidebarCollapsed ? "w-20" : "w-64")}>
+      {/* Desktop — always visible, fluid width via motion */}
+      <motion.div
+        animate={{ width: isDesktopSidebarCollapsed ? 80 : 256 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+        className="hidden md:flex shrink-0 floating-panel rounded-3xl h-full overflow-hidden"
+      >
         <SidebarContent collapsed={isDesktopSidebarCollapsed} />
-      </div>
+      </motion.div>
 
       {/* Mobile backdrop */}
-      <div
-        className={cn(
-          'fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity duration-300 md:hidden',
-          isMobileSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+      <AnimatePresence>
+        {isMobileSidebarOpen && (
+          <motion.div
+            key="backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+            onClick={() => setMobileSidebarOpen(false)}
+            aria-hidden="true"
+          />
         )}
-        onClick={() => setMobileSidebarOpen(false)}
-        aria-hidden="true"
-      />
+      </AnimatePresence>
 
       {/* Mobile drawer */}
-      <div
-        className={cn(
-          'fixed inset-y-0 left-0 z-50 w-72 border-r border-border shadow-2xl transition-transform duration-300 ease-in-out md:hidden',
-          isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      <AnimatePresence>
+        {isMobileSidebarOpen && (
+          <motion.div
+            key="drawer"
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ type: 'spring', stiffness: 350, damping: 35 }}
+            className="fixed inset-y-0 left-0 z-50 w-72 floating-panel border-r border-border/50 shadow-2xl md:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="ნავიგაციის მენიუ"
+          >
+            <SidebarContent onClose={() => setMobileSidebarOpen(false)} />
+          </motion.div>
         )}
-        role="dialog"
-        aria-modal="true"
-        aria-label="ნავიგაციის მენიუ"
-      >
-        <SidebarContent onClose={() => setMobileSidebarOpen(false)} />
-      </div>
+      </AnimatePresence>
     </>
   )
 }

@@ -125,7 +125,7 @@
    PREMIUM ANIMATIONS & MESH
    ============================================= */
 
-/* Frosty mesh background for body */
+/* Frosty mesh background for body (Deprecated in favor of AuroraBackground component, kept for fallback) */
 .mesh-bg {
   background-color: var(--background);
   background-image: 
@@ -137,29 +137,29 @@
 }
 
 @keyframes fade-up {
-  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes fade-in {
-  from { opacity: 0; filter: blur(4px); }
+  from { opacity: 0; filter: blur(8px); }
   to   { opacity: 1; filter: blur(0); }
 }
 @keyframes scale-in {
-  from { opacity: 0; transform: scale(0.95); }
+  from { opacity: 0; transform: scale(0.92); }
   to   { opacity: 1; transform: scale(1); }
 }
 @keyframes slide-right {
-  from { opacity: 0; transform: translateX(-16px); }
+  from { opacity: 0; transform: translateX(-24px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes spring-in {
-  0% { opacity: 0; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.02); }
+  0% { opacity: 0; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.04); }
   100% { opacity: 1; transform: scale(1); }
 }
 @keyframes number-pop {
   0%   { transform: scale(1); }
-  40%  { transform: scale(1.25); color: oklch(0.56 0.24 262); }
+  40%  { transform: scale(1.15); color: oklch(0.56 0.24 262); }
   100% { transform: scale(1); }
 }
 @keyframes shimmer {
@@ -168,26 +168,26 @@
 }
 @keyframes cart-bounce {
   0%, 100% { transform: scale(1); }
-  30% { transform: scale(1.28); }
-  60% { transform: scale(0.92); }
+  30% { transform: scale(1.18); }
+  60% { transform: scale(0.95); }
 }
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
-  15%       { transform: translateX(-8px); }
-  30%       { transform: translateX(8px); }
-  45%       { transform: translateX(-6px); }
-  60%       { transform: translateX(6px); }
-  75%       { transform: translateX(-3px); }
-  90%       { transform: translateX(3px); }
+  15%       { transform: translateX(-6px); }
+  30%       { transform: translateX(6px); }
+  45%       { transform: translateX(-4px); }
+  60%       { transform: translateX(4px); }
+  75%       { transform: translateX(-2px); }
+  90%       { transform: translateX(2px); }
 }
 
-.animate-fade-up   { animation: fade-up 0.5s cubic-bezier(0.16,1,0.3,1) both; }
-.animate-fade-in   { animation: fade-in 0.4s ease both; }
-.animate-scale-in  { animation: scale-in 0.4s cubic-bezier(0.16,1,0.3,1) both; }
-.animate-slide-right { animation: slide-right 0.4s cubic-bezier(0.16,1,0.3,1) both; }
-.animate-spring-in { animation: spring-in 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
-.animate-number-pop { animation: number-pop 0.4s cubic-bezier(0.16,1,0.3,1); }
-.animate-cart-bounce { animation: cart-bounce 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.animate-fade-up   { animation: fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-fade-in   { animation: fade-in 0.5s ease both; }
+.animate-scale-in  { animation: scale-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-slide-right { animation: slide-right 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-spring-in { animation: spring-in 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
+.animate-number-pop { animation: number-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+.animate-cart-bounce { animation: cart-bounce 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
 .animate-shake       { animation: shake 0.55s cubic-bezier(0.36,0.07,0.19,0.97) both; }
 
 /* Stagger helpers */
@@ -197,73 +197,93 @@
 .stagger-4 { animation-delay: 0.20s; }
 
 /* =============================================
-   3D CARD — fluid lift
+   3D CARD — 2026 magnetic lift
    ============================================= */
 .card-3d {
   transform-style: preserve-3d;
-  will-change: transform;
-  transition: transform 0.4s cubic-bezier(0.16,1,0.3,1),
-              box-shadow 0.4s cubic-bezier(0.16,1,0.3,1);
+  will-change: transform, box-shadow;
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .card-3d:hover {
-  transform: translateY(-4px) scale(1.015);
+  transform: translateY(-4px) scale(1.02);
   box-shadow:
-    0 32px 56px -12px oklch(0.56 0.24 262 / 0.12),
-    0 16px 24px -6px oklch(0 0 0 / 0.04),
-    inset 0 1px 0 oklch(1 0 0 / 0.8);
+    0 32px 64px -12px oklch(0.56 0.24 262 / 0.15),
+    0 16px 32px -6px oklch(0 0 0 / 0.05),
+    inset 0 1px 0 oklch(1 0 0 / 0.9);
 }
 .card-3d:active {
-  transform: scale(0.97);
-  transition-duration: 0.1s;
-}
-
-/* =============================================
-   PRODUCT CARD — Frost-on-White
-   ============================================= */
-.product-card {
-  transition: transform 0.35s cubic-bezier(0.16,1,0.3,1),
-              box-shadow 0.35s cubic-bezier(0.16,1,0.3,1),
-              border-color 0.35s ease,
-              background-color 0.35s ease;
-  will-change: transform, box-shadow;
-  /* Soft base shadow for the frost effect */
-  box-shadow: 0 4px 12px -2px oklch(0 0 0 / 0.03), inset 0 0 0 1px oklch(1 0 0 / 0.4);
-}
-.product-card:not(:disabled):hover {
-  transform: translateY(-6px) scale(1.025);
-  background-color: oklch(1 0 0 / 0.95);
-  box-shadow:
-    0 24px 48px -12px oklch(0.56 0.24 262 / 0.14),
-    0 8px 16px -6px oklch(0 0 0 / 0.04),
-    inset 0 0 0 1px oklch(0.56 0.24 262 / 0.3);
-  border-color: transparent;
-}
-.product-card:not(:disabled):active {
-  transform: scale(0.95) translateY(2px);
-  box-shadow:
-    0 2px 4px -2px oklch(0 0 0 / 0.05),
-    inset 0 4px 12px oklch(0 0 0 / 0.04);
+  transform: scale(0.98);
   transition-duration: 0.15s;
 }
 
 /* =============================================
-   GLASSMORPHISM & FLOATING PANELS
+   PRODUCT CARD — 2026 Bento Frost
+   ============================================= */
+.product-card {
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.4s ease,
+              background-color 0.4s ease;
+  will-change: transform, box-shadow;
+  box-shadow: 0 8px 24px -4px oklch(0 0 0 / 0.04), inset 0 0 0 1px oklch(1 0 0 / 0.6);
+  background-color: oklch(1 0 0 / 0.7);
+  backdrop-filter: blur(12px);
+}
+.product-card:not(:disabled):hover {
+  transform: translateY(-8px) scale(1.03);
+  background-color: oklch(1 0 0 / 0.95);
+  box-shadow:
+    0 32px 56px -12px oklch(0.56 0.24 262 / 0.18),
+    0 16px 24px -6px oklch(0 0 0 / 0.06),
+    inset 0 0 0 1px oklch(0.56 0.24 262 / 0.4);
+  border-color: transparent;
+}
+.product-card:not(:disabled):active {
+  transform: scale(0.96) translateY(2px);
+  box-shadow:
+    0 4px 8px -2px oklch(0 0 0 / 0.08),
+    inset 0 4px 16px oklch(0 0 0 / 0.06);
+  transition-duration: 0.15s;
+}
+
+/* =============================================
+   2026 GLASSMORPHISM & FLOATING PANELS
    ============================================= */
 .glass {
-  backdrop-filter: blur(24px) saturate(180%);
-  background: oklch(1 0 0 / 0.65);
-  border: 1px solid oklch(1 0 0 / 0.5);
-  box-shadow: inset 0 1px 1px oklch(1 0 0 / 0.8),
-              0 8px 24px -6px oklch(0 0 0 / 0.03);
+  backdrop-filter: blur(40px) saturate(200%);
+  background: linear-gradient(135deg, oklch(1 0 0 / 0.7) 0%, oklch(0.98 0.01 248 / 0.5) 100%);
+  border: 1px solid oklch(1 0 0 / 0.6);
+  box-shadow: 
+    inset 0 1.5px 1.5px oklch(1 0 0 / 0.9),
+    inset 0 -1px 0 oklch(0 0 0 / 0.03),
+    0 12px 36px -12px oklch(0 0 0 / 0.05);
 }
 
 .floating-panel {
-  backdrop-filter: blur(20px);
-  background: oklch(1 0 0 / 0.85);
-  border: 1px solid oklch(0.95 0.02 248 / 0.6);
+  backdrop-filter: blur(32px) saturate(180%);
+  background: linear-gradient(145deg, oklch(1 0 0 / 0.85) 0%, oklch(1 0 0 / 0.6) 100%);
+  border: 1px solid oklch(1 0 0 / 0.7);
   box-shadow: 
-    0 16px 32px -8px oklch(0 0 0 / 0.06),
-    inset 0 1px 0 oklch(1 0 0 / 0.9);
+    0 24px 48px -12px oklch(0 0 0 / 0.08),
+    0 8px 16px -4px oklch(0 0 0 / 0.03),
+    inset 0 2px 2px oklch(1 0 0 / 0.9);
+}
+
+.bento-card {
+  backdrop-filter: blur(24px);
+  background: oklch(1 0 0 / 0.65);
+  border: 1px solid oklch(1 0 0 / 0.6);
+  box-shadow: 
+    inset 0 1px 1px oklch(1 0 0 / 0.9),
+    0 12px 24px -8px oklch(0 0 0 / 0.05);
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.4s ease;
+}
+.bento-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    inset 0 1px 1px oklch(1 0 0 / 0.9),
+    0 20px 32px -10px oklch(0 0 0 / 0.08);
 }
 
 /* =============================================

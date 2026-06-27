@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import type { Product } from '@/lib/mock-data'
 import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
 import * as XLSX from 'xlsx'
+import { motion } from 'framer-motion'
 
 const PAGE_SIZE = 15
 
@@ -119,7 +120,12 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
   }
 
   return (
-    <div className="flex-1 flex flex-col gap-4 min-w-0 animate-fade-up">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+      className="flex-1 flex flex-col gap-4 min-w-0"
+    >
 
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -166,7 +172,7 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
       </div>
 
       {/* Table card */}
-      <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col">
+      <div className="bento-card rounded-2xl overflow-hidden flex flex-col">
         <div className="overflow-x-auto flex-1">
           <table className="w-full text-sm">
             <thead>
@@ -194,8 +200,11 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
                   </td>
                 </tr>
               ) : pageProducts.map((p, i) => (
-                <tr
+                <motion.tr
                   key={p.id}
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.04, type: 'spring', stiffness: 300, damping: 28 }}
                   className={cn(
                     'table-row-hover border-b border-border/40 last:border-0 group',
                     highlightId === p.id && 'bg-primary/5'
@@ -238,7 +247,7 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
                       </button>
                     </div>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
@@ -280,6 +289,6 @@ export function ProductList({ selectedCategoryId, onOpenMobileCategories }: { se
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </motion.div>
   )
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Package, ShoppingCart, BarChart2, Bell, Search, Settings, Lock, Menu, LogOut, AlertTriangle, PackageX, CheckCircle2, Truck, BookOpen, HandCoins, Users } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
 import { createClient } from '@/lib/supabase/client'
@@ -64,21 +65,31 @@ export function TopHeader() {
   }, [])
 
   return (
-    <header className="h-16 floating-panel rounded-3xl shrink-0 z-20 flex items-center justify-between px-4 md:px-6 gap-3 md:gap-4">
+    <motion.header
+      initial={{ opacity: 0, y: -12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.05 }}
+      className="h-16 floating-panel rounded-3xl shrink-0 z-20 flex items-center justify-between px-4 md:px-6 gap-3 md:gap-4"
+    >
 
       {/* Left: hamburger (mobile) + module title */}
       <div className="flex items-center gap-3">
         {/* Hamburger — mobile only */}
-        <button
+        <motion.button
+          whileTap={{ scale: 0.92 }}
           onClick={() => setMobileSidebarOpen(true)}
           className="md:hidden size-9 rounded-xl border border-border bg-white hover:bg-accent transition-all duration-150 flex items-center justify-center shrink-0"
           aria-label="მენიუს გახსნა"
         >
           <Menu className="size-4 text-foreground" />
-        </button>
-        <div className={cn('size-9 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-md', gradient)}>
+        </motion.button>
+        <motion.div
+          key={key}
+          layoutId="headerModuleIcon"
+          className={cn('size-9 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-md', gradient)}
+        >
           <Icon className="size-4.5 text-white" />
-        </div>
+        </motion.div>
         <div>
           <h1 className="text-sm font-bold text-foreground leading-tight">{label}</h1>
           <p className="text-[11px] text-muted-foreground leading-none mt-0.5">{sub}</p>
@@ -137,8 +148,16 @@ export function TopHeader() {
             )}
           </button>
 
+          <AnimatePresence>
           {notifOpen && (
-            <div className="absolute right-0 top-12 z-50 w-80 max-h-[70vh] bg-white rounded-2xl border border-border shadow-xl shadow-black/10 overflow-hidden animate-fade-up flex flex-col">
+            <motion.div
+              key="notif-panel"
+              initial={{ opacity: 0, y: -8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.97 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+              className="absolute right-0 top-12 z-50 w-80 max-h-[70vh] bg-white/90 backdrop-blur-xl rounded-2xl border border-border shadow-xl shadow-black/10 overflow-hidden flex flex-col"
+            >
               {/* Header */}
               <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-border bg-gradient-to-r from-amber-500/5 to-orange-500/5">
                 <div className="size-8 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-sm">
@@ -196,8 +215,9 @@ export function TopHeader() {
                   საწყობში გადასვლა →
                 </button>
               )}
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </div>
 
         {/* Logout */}
@@ -216,6 +236,6 @@ export function TopHeader() {
           </div>
         </div>
       </div>
-    </header>
+    </motion.header>
   )
 }
