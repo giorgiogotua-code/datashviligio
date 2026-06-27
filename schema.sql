@@ -418,6 +418,9 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 
+-- Trigger-only function: never reachable as a REST RPC.
+REVOKE EXECUTE ON FUNCTION handle_new_user() FROM PUBLIC, anon, authenticated;
+
 -- ============================================================
 --  PLATFORM (god-mode) overview — every org with quick counts.
 --  Gated: raises unless the caller is a platform admin.
