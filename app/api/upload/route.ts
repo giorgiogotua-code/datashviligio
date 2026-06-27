@@ -16,6 +16,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Namespace photos by tenant so shops never share an R2 path.
+    const { data: membership } = await supabase
+      .from('memberships').select('org_id').eq('user_id', user.id).maybeSingle()
+    const orgId = membership?.org_id
+    if (!orgId) {
+      return NextResponse.json({ error: 'No organization' }, { status: 403 })
+    }
+
     // On Cloudflare Workers, secrets are only available per-request.
     const accountId = process.env.R2_ACCOUNT_ID
     const accessKeyId = process.env.R2_ACCESS_KEY_ID
@@ -36,10 +44,11 @@ export async function POST(request: NextRequest) {
     }
 
     const filename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    const key = `${orgId}/${filename}`
     const body = await file.arrayBuffer()
 
     const client = new AwsClient({ accessKeyId, secretAccessKey, region: 'auto', service: 's3' })
-    const endpoint = `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${filename}`
+    const endpoint = `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${key}`
     const res = await client.fetch(endpoint, {
       method: 'PUT',
       body,
@@ -52,7 +61,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to upload photo' }, { status: 500 })
     }
 
-    const publicUrl = `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${filename}`
+    const publicUrl = `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${key}`
     return NextResponse.json({ url: publicUrl })
   } catch (error: any) {
     console.error('R2 Upload Error:', error?.name, error?.message)

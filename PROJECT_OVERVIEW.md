@@ -42,6 +42,19 @@ Postgres functions** (one transaction) called via `supabase.rpc`.
 | `/guide` | **სახელმძღვანელო** | In-app searchable manual for the admin. |
 | `/settings` | **პარამეტრები** | Company info (shown on receipts), in-app PIN lock. |
 
+### Multi-tenancy (SaaS)
+The app is **pooled multi-tenant**: one shared Postgres, every business row tagged
+with `org_id` (auto-stamped via the `auth_org()` column default), isolated by RLS.
+- **1 shop = 1 organization.** Owners are Supabase users with a `membership(owner)`;
+  cashiers stay in-app (PIN) and need no account.
+- **Self-serve signup** (`/signup`): the `handle_new_user` trigger provisions an org
+  (14-day trial), owner membership, and default settings on registration.
+- **Plans:** `trial` / `pro` / `enterprise`. **Suspension:** a `suspended` org is
+  frozen (RLS blocks writes; the app shows a suspended screen).
+- **God mode** (`/platform`): platform admins (in `platform_admins`) see every org,
+  change plans, and suspend/activate — gated by `is_platform_admin()`.
+- Photos are namespaced in R2 by `org_id/`.
+
 ### Shifts & Z-report (cash control)
 Selling requires an open shift. A cashier opens a shift with their **PIN + opening
 cash float**; every sale/return is tagged with the shift. Closing runs a **Z-report**:
@@ -93,6 +106,13 @@ Full DDL: [`schema.sql`](schema.sql) (fresh install). Incremental changes: [`mig
 | 008 | Unique cashier PIN (active) |
 | 009 | Returns reverse customer credit debt |
 | 010 | Shift cash reconciliation (debt repayments / supplier payments, payment method) |
+| 011 | Multi-tenant foundation: `organizations` + `memberships` + `platform_admins` + helper fns |
+| 012 | `org_id` on all 15 business tables (NOT NULL, `DEFAULT auth_org()`) |
+| 013 | Tenant-isolation RLS (org-scoped read/write, platform-admin bypass, suspension) |
+| 014 | Security hardening (function `search_path`, revoke anon on helpers) |
+| 015 | `settings` primary key → `(org_id, key)` |
+| 016 | Self-serve signup trigger (`handle_new_user`) |
+| 017 | Platform (god-mode) overview function |
 
 > ⚠️ If a migration changes `create_sale`'s parameter list **and** the client sends
 > the new params, run the migration **before** deploying, or sales break.

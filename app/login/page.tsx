@@ -91,6 +91,11 @@ export default function LoginPage() {
           >
             {loading ? <Loader2 className="size-5 animate-spin" /> : 'შესვლა'}
           </Button>
+
+          <p className="text-center text-sm text-muted-foreground">
+            არ გაქვს ანგარიში?{' '}
+            <a href="/signup" className="font-bold text-primary hover:underline">შექმენი მაღაზია</a>
+          </p>
         </form>
 
         <p className="text-center text-xs text-muted-foreground/70 mt-6">

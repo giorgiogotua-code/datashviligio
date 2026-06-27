@@ -47,6 +47,8 @@ export interface StoreState {
   shifts: Shift[]
   settings: Settings
   pin: string
+  currentOrg: CurrentOrg | null
+  isPlatformAdmin: boolean
   isHydrated: boolean
   isLocked: boolean
   isMobileSidebarOpen: boolean
@@ -117,6 +119,17 @@ const DEFAULT_SETTINGS: Settings = {
   companyId: '',
   address: '',
   phone: '',
+}
+
+// The signed-in user's organization (tenant) + their platform role.
+export type OrgPlan = 'trial' | 'pro' | 'enterprise'
+export type OrgStatus = 'active' | 'suspended'
+export interface CurrentOrg {
+  id: string
+  name: string
+  plan: OrgPlan
+  status: OrgStatus
+  trial_ends_at: string | null
 }
 
 // ---- Row mappers: Postgres numeric/decimal can arrive as strings, so coerce. ----
@@ -329,6 +342,8 @@ export const useStore = create<StoreState>()(
       shifts: [],
       settings: DEFAULT_SETTINGS,
       pin: '1234',
+      currentOrg: null,
+      isPlatformAdmin: false,
       isHydrated: false,
       isLocked: false,
       isMobileSidebarOpen: false,
@@ -378,6 +393,21 @@ export const useStore = create<StoreState>()(
           phone: kv.phone ?? DEFAULT_SETTINGS.phone,
         }
 
+        // Tenant (organization) + platform-admin role for this user.
+        const [orgRow, adminRow] = await Promise.all([
+          supabase.from('memberships').select('org_id, organizations(id,name,plan,status,trial_ends_at)').maybeSingle(),
+          supabase.from('platform_admins').select('user_id').maybeSingle(),
+        ])
+        const orgData: any = (orgRow.data as any)?.organizations ?? null
+        const currentOrg: CurrentOrg | null = orgData ? {
+          id: orgData.id,
+          name: orgData.name,
+          plan: orgData.plan,
+          status: orgData.status,
+          trial_ends_at: orgData.trial_ends_at ?? null,
+        } : null
+        const isPlatformAdmin = !!adminRow.data
+
         set({
           categories: (cats.data ?? []) as Category[],
           products: (prods.data ?? []).map(mapProduct),
@@ -394,6 +424,8 @@ export const useStore = create<StoreState>()(
           shifts: (shiftRows.data ?? []).map(mapShift),
           settings,
           pin: kv.pin ?? '1234',
+          currentOrg,
+          isPlatformAdmin,
           isHydrated: true,
         })
       },
@@ -416,15 +448,22 @@ export const useStore = create<StoreState>()(
         const prev = get().settings
         const next = { ...prev, ...s }
         set({ settings: next }) // optimistic
-        const rows = Object.entries(s).map(([key, value]) => ({ key, value: String(value ?? '') }))
-        const { error } = await supabase.from('settings').upsert(rows, { onConflict: 'key' })
+        const orgId = get().currentOrg?.id
+        const rows = Object.entries(s).map(([key, value]) => ({
+          ...(orgId ? { org_id: orgId } : {}), key, value: String(value ?? ''),
+        }))
+        const { error } = await supabase.from('settings').upsert(rows, { onConflict: 'org_id,key' })
         if (failed(error, 'პარამეტრების შენახვა ვერ მოხერხდა')) set({ settings: prev })
       },
 
       setPin: async (pin) => {
         const prev = get().pin
         set({ pin }) // optimistic
-        const { error } = await supabase.from('settings').upsert({ key: 'pin', value: pin }, { onConflict: 'key' })
+        const orgId = get().currentOrg?.id
+        const { error } = await supabase.from('settings').upsert(
+          { ...(orgId ? { org_id: orgId } : {}), key: 'pin', value: pin },
+          { onConflict: 'org_id,key' },
+        )
         if (failed(error, 'PIN-ის შენახვა ვერ მოხერხდა')) set({ pin: prev })
       },
 

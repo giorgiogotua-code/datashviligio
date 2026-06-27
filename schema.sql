@@ -1,10 +1,15 @@
 -- ============================================================
---  AccessoryShop POS — Database Schema
+--  AccessoryShop POS — Database Schema (MULTI-TENANT)
 --  Run this whole file in Supabase → SQL Editor → New query.
 --  Safe to re-run: it drops and recreates everything.
+--
+--  Tenancy model: 1 shop = 1 organization. Every business row
+--  carries org_id (auto-stamped from the caller via auth_org()).
+--  RLS isolates each org; platform admins (god mode) see all.
+--  A new shop is provisioned automatically on first signup by
+--  the handle_new_user() trigger.
 -- ============================================================
 
--- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Clean slate (so the file can be re-run without errors)
@@ -23,24 +28,85 @@ DROP TABLE IF EXISTS sales CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
 DROP TABLE IF EXISTS settings CASCADE;
+DROP TABLE IF EXISTS memberships CASCADE;
+DROP TABLE IF EXISTS platform_admins CASCADE;
+DROP TABLE IF EXISTS organizations CASCADE;
+
+-- ============================================================
+--  TENANCY — organizations, platform admins, memberships
+-- ============================================================
+CREATE TABLE organizations (
+  id                  UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name                TEXT NOT NULL,
+  plan                TEXT NOT NULL DEFAULT 'trial'  CHECK (plan   IN ('trial','pro','enterprise')),
+  status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
+  trial_ends_at       TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
+  billing_customer_id TEXT,          -- Phase 3 (billing) placeholders
+  subscription_status TEXT,
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE platform_admins (
+  user_id    UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE memberships (
+  id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id     UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES auth.users(id)   ON DELETE CASCADE,
+  role       TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner','admin','staff')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (org_id, user_id)
+);
+CREATE INDEX idx_memberships_user ON memberships(user_id);
+
+-- ---- Tenant helper functions (SECURITY DEFINER to avoid RLS recursion) ----
+CREATE OR REPLACE FUNCTION auth_org() RETURNS UUID
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
+  SELECT org_id FROM memberships WHERE user_id = auth.uid() LIMIT 1;
+$$;
+
+CREATE OR REPLACE FUNCTION is_platform_admin() RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
+  SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = auth.uid());
+$$;
+
+CREATE OR REPLACE FUNCTION current_org_active() RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
+  SELECT COALESCE((SELECT status = 'active' FROM organizations WHERE id = auth_org()), false);
+$$;
+
+REVOKE EXECUTE ON FUNCTION auth_org()          FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION is_platform_admin() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION current_org_active() FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION auth_org()          TO authenticated;
+GRANT  EXECUTE ON FUNCTION is_platform_admin() TO authenticated;
+GRANT  EXECUTE ON FUNCTION current_org_active() TO authenticated;
+
+-- org_id default for every business table: stamps the caller's org.
+-- (Defined once here as a shorthand reminder — used inline below.)
 
 -- ============================================================
 --  CATEGORIES
 -- ============================================================
 CREATE TABLE categories (
   id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id     UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   name       TEXT NOT NULL,
   parent_id  UUID REFERENCES categories(id) ON DELETE CASCADE,
   icon       TEXT,                       -- lucide icon name (e.g. 'smartphone'), NULL for sub-categories
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_categories_parent ON categories(parent_id);
+CREATE INDEX idx_categories_org    ON categories(org_id);
 
 -- ============================================================
 --  PRODUCTS
 -- ============================================================
 CREATE TABLE products (
   id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id         UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   name           TEXT NOT NULL,
   barcode        TEXT,
   category_id    UUID REFERENCES categories(id) ON DELETE SET NULL,
@@ -52,34 +118,40 @@ CREATE TABLE products (
 );
 CREATE INDEX idx_products_category ON products(category_id);
 CREATE INDEX idx_products_barcode  ON products(barcode);
+CREATE INDEX idx_products_org      ON products(org_id);
 
 -- ============================================================
 --  CUSTOMERS (credit / ნისია — created before sales for the FK)
 -- ============================================================
 CREATE TABLE customers (
   id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id     UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   name       TEXT NOT NULL,
   phone      TEXT,
   note       TEXT,
   balance    DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- amount the customer OWES US (positive = their debt)
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX idx_customers_org ON customers(org_id);
 
 -- ============================================================
 --  CASHIERS + SHIFTS (created before sales for the FKs)
 -- ============================================================
 CREATE TABLE cashiers (
   id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id     UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   name       TEXT NOT NULL,
   pin        TEXT NOT NULL,
   active     BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
--- PIN identifies the cashier at shift open → unique among active cashiers.
-CREATE UNIQUE INDEX idx_cashiers_pin_active ON cashiers(pin) WHERE active;
+-- PIN identifies the cashier at shift open → unique among active cashiers, per org.
+CREATE UNIQUE INDEX idx_cashiers_pin_active ON cashiers(org_id, pin) WHERE active;
+CREATE INDEX idx_cashiers_org ON cashiers(org_id);
 
 CREATE TABLE shifts (
   id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id        UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   cashier_id    UUID REFERENCES cashiers(id) ON DELETE SET NULL,
   cashier_name  TEXT,
   status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
@@ -99,12 +171,14 @@ CREATE TABLE shifts (
   closed_at     TIMESTAMPTZ
 );
 CREATE INDEX idx_shifts_status ON shifts(status);
+CREATE INDEX idx_shifts_org    ON shifts(org_id);
 
 -- ============================================================
 --  SALES (one row per receipt)
 -- ============================================================
 CREATE TABLE sales (
   id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id         UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   total          DECIMAL(10, 2) NOT NULL,
   discount       DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- discount amount applied (total is already net)
   payment_method TEXT CHECK (payment_method IN ('cash', 'card', 'credit')) NOT NULL,
@@ -117,22 +191,22 @@ CREATE TABLE sales (
   items_count    INTEGER NOT NULL DEFAULT 0,
   type           TEXT NOT NULL DEFAULT 'sale' CHECK (type IN ('sale','return')),
   reversal_of    UUID REFERENCES sales(id) ON DELETE SET NULL,   -- for returns: original sale
-  -- Fiscalization (RS.GE cash register). is_fiscal = was a receipt requested for this sale.
   is_fiscal      BOOLEAN NOT NULL DEFAULT false,
   fiscal_status  TEXT NOT NULL DEFAULT 'none' CHECK (fiscal_status IN ('none','pending','success','failed')),
-  fiscal_id      TEXT,            -- receipt number returned by the fiscal device
-  fiscal_data    JSONB,           -- full raw response (QR, sequence, device id, ...)
+  fiscal_id      TEXT,
+  fiscal_data    JSONB,
   fiscalized_at  TIMESTAMPTZ,
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_sales_created ON sales(created_at);
+CREATE INDEX idx_sales_org     ON sales(org_id);
 
 -- ============================================================
---  SALE ITEMS (line items per receipt — denormalized so the
---  receipt stays readable even if the product is later deleted)
+--  SALE ITEMS (line items per receipt)
 -- ============================================================
 CREATE TABLE sale_items (
   id           UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id       UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   sale_id      UUID REFERENCES sales(id) ON DELETE CASCADE,
   product_id   UUID REFERENCES products(id) ON DELETE SET NULL,
   product_name TEXT NOT NULL,
@@ -143,13 +217,16 @@ CREATE TABLE sale_items (
   unit_cost    DECIMAL(10, 2) NOT NULL DEFAULT 0   -- product cost at sale time (for real margin)
 );
 CREATE INDEX idx_sale_items_sale ON sale_items(sale_id);
+CREATE INDEX idx_sale_items_org  ON sale_items(org_id);
 
 -- ============================================================
---  SETTINGS (key-value)
+--  SETTINGS (key-value, per organization)
 -- ============================================================
 CREATE TABLE settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL DEFAULT ''
+  org_id UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
+  key    TEXT NOT NULL,
+  value  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (org_id, key)
 );
 
 -- ============================================================
@@ -157,6 +234,7 @@ CREATE TABLE settings (
 -- ============================================================
 CREATE TABLE customer_payments (
   id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id      UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
   amount      DECIMAL(10, 2) NOT NULL,
   note        TEXT,
@@ -164,8 +242,9 @@ CREATE TABLE customer_payments (
   method      TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash','card','transfer')),
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_customer_payments_shift ON customer_payments(shift_id);
+CREATE INDEX idx_customer_payments_shift    ON customer_payments(shift_id);
 CREATE INDEX idx_customer_payments_customer ON customer_payments(customer_id);
+CREATE INDEX idx_customer_payments_org      ON customer_payments(org_id);
 CREATE INDEX idx_sales_customer ON sales(customer_id);
 CREATE INDEX idx_sales_shift    ON sales(shift_id);
 
@@ -174,22 +253,25 @@ CREATE INDEX idx_sales_shift    ON sales(shift_id);
 -- ============================================================
 CREATE TABLE held_carts (
   id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  label          TEXT,                                  -- optional note / customer name
-  items          JSONB NOT NULL DEFAULT '[]',           -- cart line items
-  discount       DECIMAL(10, 2) NOT NULL DEFAULT 0,     -- computed discount amount
+  org_id         UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
+  label          TEXT,
+  items          JSONB NOT NULL DEFAULT '[]',
+  discount       DECIMAL(10, 2) NOT NULL DEFAULT 0,
   discount_type  TEXT CHECK (discount_type IN ('amount','percent')),
-  discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0,     -- raw value the cashier typed (₾ or %)
-  total          DECIMAL(10, 2) NOT NULL DEFAULT 0,     -- final total snapshot (after discount)
+  discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  total          DECIMAL(10, 2) NOT NULL DEFAULT 0,
   items_count    INTEGER NOT NULL DEFAULT 0,
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_held_carts_created ON held_carts(created_at);
+CREATE INDEX idx_held_carts_org     ON held_carts(org_id);
 
 -- ============================================================
 --  SUPPLIERS + PURCHASING (with supplier debt)
 -- ============================================================
 CREATE TABLE suppliers (
   id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id     UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   name       TEXT NOT NULL,
   phone      TEXT,
   contact    TEXT,
@@ -198,9 +280,11 @@ CREATE TABLE suppliers (
   balance    DECIMAL(10, 2) NOT NULL DEFAULT 0,    -- amount WE OWE the supplier (positive = our debt)
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX idx_suppliers_org ON suppliers(org_id);
 
 CREATE TABLE purchases (
   id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id        UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   supplier_id   UUID REFERENCES suppliers(id) ON DELETE SET NULL,
   supplier_name TEXT,
   total         DECIMAL(10, 2) NOT NULL DEFAULT 0,
@@ -211,9 +295,11 @@ CREATE TABLE purchases (
 );
 CREATE INDEX idx_purchases_supplier ON purchases(supplier_id);
 CREATE INDEX idx_purchases_created  ON purchases(created_at);
+CREATE INDEX idx_purchases_org      ON purchases(org_id);
 
 CREATE TABLE purchase_items (
   id           UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id       UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   purchase_id  UUID REFERENCES purchases(id) ON DELETE CASCADE,
   product_id   UUID REFERENCES products(id) ON DELETE SET NULL,
   product_name TEXT NOT NULL,
@@ -223,9 +309,11 @@ CREATE TABLE purchase_items (
   total_cost   DECIMAL(10, 2) NOT NULL
 );
 CREATE INDEX idx_purchase_items_purchase ON purchase_items(purchase_id);
+CREATE INDEX idx_purchase_items_org      ON purchase_items(org_id);
 
 CREATE TABLE supplier_payments (
   id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  org_id      UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
   supplier_id UUID REFERENCES suppliers(id) ON DELETE CASCADE,
   amount      DECIMAL(10, 2) NOT NULL,
   note        TEXT,
@@ -234,67 +322,133 @@ CREATE TABLE supplier_payments (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_supplier_payments_supplier ON supplier_payments(supplier_id);
-CREATE INDEX idx_supplier_payments_shift ON supplier_payments(shift_id);
-
-INSERT INTO settings (key, value) VALUES
-  ('companyName', 'AccessoryShop'),
-  ('companyId',   ''),
-  ('address',     ''),
-  ('phone',       ''),
-  ('pin',         '1234');     -- in-app quick-lock PIN (separate from the real login)
+CREATE INDEX idx_supplier_payments_shift    ON supplier_payments(shift_id);
+CREATE INDEX idx_supplier_payments_org      ON supplier_payments(org_id);
 
 -- ============================================================
 --  FISCAL REPORTS (audit log of Z / X reports from the device)
 -- ============================================================
 CREATE TABLE fiscal_reports (
   id         UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  type       TEXT NOT NULL CHECK (type IN ('Z','X')),   -- Z = day close, X = mid-day read
-  report_id  TEXT,                                       -- report number from the device
-  data       JSONB,                                      -- full device response (daily totals, ...)
+  org_id     UUID NOT NULL DEFAULT auth_org() REFERENCES organizations(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL CHECK (type IN ('Z','X')),
+  report_id  TEXT,
+  data       JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX idx_fiscal_reports_org ON fiscal_reports(org_id);
 
 -- ============================================================
---  ROW LEVEL SECURITY
---  Admin-only portal: any signed-in (authenticated) user has
---  full access; anonymous visitors have none.
+--  ROW LEVEL SECURITY — tenant isolation
+--    READ : your own org, or you are a platform admin
+--    WRITE: your own org AND it is active, or platform admin
 -- ============================================================
-ALTER TABLE categories     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sales          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sale_items     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settings          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE held_carts        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customers         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer_payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cashiers          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE shifts            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE suppliers         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE purchases         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE purchase_items    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE supplier_payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE fiscal_reports    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE organizations   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships     ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "authenticated full access" ON categories        FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON products          FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON sales             FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON sale_items        FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON settings          FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON held_carts        FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON customers         FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON customer_payments FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON cashiers          FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON shifts            FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON suppliers         FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON purchases         FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON purchase_items    FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON supplier_payments FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "authenticated full access" ON fiscal_reports    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "org read"  ON organizations FOR SELECT TO authenticated
+  USING (id = auth_org() OR is_platform_admin());
+CREATE POLICY "org write" ON organizations FOR ALL TO authenticated
+  USING (is_platform_admin()) WITH CHECK (is_platform_admin());
+
+CREATE POLICY "platform admins only" ON platform_admins FOR ALL TO authenticated
+  USING (is_platform_admin()) WITH CHECK (is_platform_admin());
+
+CREATE POLICY "membership read"  ON memberships FOR SELECT TO authenticated
+  USING (user_id = auth.uid() OR is_platform_admin());
+CREATE POLICY "membership write" ON memberships FOR ALL TO authenticated
+  USING (is_platform_admin()) WITH CHECK (is_platform_admin());
+
+-- Business tables: one tenant-isolation policy each.
+DO $$
+DECLARE
+  t    TEXT;
+  tbls TEXT[] := ARRAY[
+    'categories','products','sales','sale_items','suppliers','purchases',
+    'purchase_items','supplier_payments','customers','customer_payments',
+    'cashiers','shifts','held_carts','fiscal_reports','settings'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tbls LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format($f$
+      CREATE POLICY "tenant isolation" ON %I
+        FOR ALL TO authenticated
+        USING (org_id = auth_org() OR is_platform_admin())
+        WITH CHECK ((org_id = auth_org() AND current_org_active()) OR is_platform_admin())
+    $f$, t);
+  END LOOP;
+END $$;
 
 -- ============================================================
---  ATOMIC SALE
---  Insert sale + line items + adjust stock in one transaction.
---  p_type = 'sale' lowers stock, 'return' restores it.
+--  SELF-SERVE SIGNUP — provision a tenant on first registration.
+--  Reads shop name from signUp options.data.shop_name.
+-- ============================================================
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth
+AS $$
+DECLARE
+  v_org  UUID;
+  v_shop TEXT := COALESCE(NULLIF(trim(NEW.raw_user_meta_data->>'shop_name'), ''), 'ჩემი მაღაზია');
+BEGIN
+  IF EXISTS (SELECT 1 FROM memberships WHERE user_id = NEW.id) THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO organizations(name, plan, status) VALUES (v_shop, 'trial', 'active')
+  RETURNING id INTO v_org;
+
+  INSERT INTO memberships(org_id, user_id, role) VALUES (v_org, NEW.id, 'owner');
+
+  INSERT INTO settings(org_id, key, value) VALUES
+    (v_org, 'companyName', v_shop),
+    (v_org, 'companyId',  ''),
+    (v_org, 'address',    ''),
+    (v_org, 'phone',      '')
+  ON CONFLICT (org_id, key) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- ============================================================
+--  PLATFORM (god-mode) overview — every org with quick counts.
+--  Gated: raises unless the caller is a platform admin.
+-- ============================================================
+CREATE OR REPLACE FUNCTION platform_org_overview()
+RETURNS TABLE (
+  id UUID, name TEXT, plan TEXT, status TEXT,
+  trial_ends_at TIMESTAMPTZ, created_at TIMESTAMPTZ,
+  members BIGINT, products BIGINT, sales BIGINT
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, auth
+AS $$
+BEGIN
+  IF NOT is_platform_admin() THEN
+    RAISE EXCEPTION 'NOT_AUTHORIZED' USING ERRCODE = '42501';
+  END IF;
+  RETURN QUERY
+    SELECT o.id, o.name, o.plan, o.status, o.trial_ends_at, o.created_at,
+           (SELECT count(*) FROM memberships m WHERE m.org_id = o.id),
+           (SELECT count(*) FROM products    p WHERE p.org_id = o.id),
+           (SELECT count(*) FROM sales       s WHERE s.org_id = o.id AND s.type = 'sale')
+    FROM organizations o
+    ORDER BY o.created_at DESC;
+END;
+$$;
+REVOKE EXECUTE ON FUNCTION platform_org_overview() FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION platform_org_overview() TO authenticated;
+
+-- ============================================================
+--  ATOMIC SALE — sale + line items + stock in one transaction.
+--  org_id is auto-stamped via the column default (auth_org()).
 --  SECURITY INVOKER -> runs as the caller, so RLS still applies.
 -- ============================================================
 CREATE OR REPLACE FUNCTION create_sale(
@@ -315,6 +469,7 @@ CREATE OR REPLACE FUNCTION create_sale(
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_sale  sales;
@@ -339,7 +494,6 @@ BEGIN
     v_qty  := (v_item->>'quantity')::int;
     v_cost := 0;
 
-    -- Lock the product to read its cost + current stock.
     IF v_pid IS NOT NULL THEN
       SELECT quantity, purchase_price INTO v_avail, v_cost FROM products WHERE id = v_pid FOR UPDATE;
       IF p_type = 'sale' AND v_avail IS NOT NULL AND v_avail < v_qty THEN
@@ -360,14 +514,10 @@ BEGIN
     );
 
     IF v_pid IS NOT NULL THEN
-      UPDATE products
-        SET quantity = GREATEST(0, quantity + v_dir * v_qty)
-        WHERE id = v_pid;
+      UPDATE products SET quantity = GREATEST(0, quantity + v_dir * v_qty) WHERE id = v_pid;
     END IF;
   END LOOP;
 
-  -- Customer balance: a credit sale adds the unpaid remainder to the debt;
-  -- a return of a customer-linked sale lowers the debt by the returned amount.
   IF p_customer_id IS NOT NULL THEN
     IF p_type = 'return' THEN
       UPDATE customers SET balance = balance - p_total WHERE id = p_customer_id;
@@ -395,6 +545,7 @@ CREATE OR REPLACE FUNCTION pay_customer(
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_payment customer_payments;
@@ -416,7 +567,7 @@ $$;
 --  OPEN / CLOSE SHIFT (Z-report)
 -- ============================================================
 CREATE OR REPLACE FUNCTION open_shift(p_cashier_id UUID, p_cashier_name TEXT, p_opening_cash NUMERIC)
-RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, extensions AS $$
 DECLARE v_shift shifts;
 BEGIN
   IF EXISTS (SELECT 1 FROM shifts WHERE status = 'open') THEN
@@ -430,7 +581,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION close_shift(p_shift_id UUID, p_closing_cash NUMERIC)
-RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, extensions AS $$
 DECLARE
   v_shift shifts;
   v_cash NUMERIC; v_card NUMERIC; v_credit NUMERIC; v_credit_paid NUMERIC;
@@ -467,7 +618,7 @@ END;
 $$;
 
 -- ============================================================
---  ATOMIC PURCHASE — insert purchase + items, raise stock,
+--  ATOMIC PURCHASE — purchase + items, raise stock,
 --  refresh purchase_price, add unpaid remainder to supplier debt.
 -- ============================================================
 CREATE OR REPLACE FUNCTION create_purchase(
@@ -481,6 +632,7 @@ CREATE OR REPLACE FUNCTION create_purchase(
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_purchase purchases;
@@ -530,6 +682,7 @@ CREATE OR REPLACE FUNCTION pay_supplier(
 ) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_payment supplier_payments;

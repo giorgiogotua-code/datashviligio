@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Package, ShoppingCart, BarChart2, Smartphone, Zap, Settings, Lock, X, Wrench, Menu, Truck, BookOpen, HandCoins, Users } from 'lucide-react'
+import { Package, ShoppingCart, BarChart2, Smartphone, Zap, Settings, Lock, X, Wrench, Menu, Truck, BookOpen, HandCoins, Users, Shield } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store'
@@ -22,7 +22,7 @@ const NAV_ITEMS = [
 
 function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, collapsed?: boolean }) {
   const pathname = usePathname()
-  const { lock, settings, setDesktopSidebarCollapsed } = useStore()
+  const { lock, settings, setDesktopSidebarCollapsed, isPlatformAdmin } = useStore()
 
   return (
     <aside className={cn(
@@ -138,6 +138,24 @@ function SidebarContent({ onClose, collapsed = false }: { onClose?: () => void, 
             </Link>
           )
         })}
+
+        {/* Platform console — only for god-mode admins */}
+        {isPlatformAdmin && (
+          <Link
+            href="/platform"
+            onClick={onClose}
+            title={collapsed ? 'პლატფორმა' : undefined}
+            className={cn(
+              'group relative flex items-center gap-3 py-3 rounded-2xl font-semibold transition-all duration-200 mt-1 border border-indigo-500/20 bg-indigo-500/5 text-indigo-600 hover:bg-indigo-500/10',
+              collapsed ? 'px-0 justify-center w-12 h-12' : 'px-3 text-sm',
+            )}
+          >
+            <span className="relative z-10 size-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 shadow-sm">
+              <Shield className="size-4 text-white" />
+            </span>
+            {!collapsed && <span className="relative z-10">პლატფორმა</span>}
+          </Link>
+        )}
       </nav>
 
       {/* Divider */}
