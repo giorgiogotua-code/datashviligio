@@ -360,7 +360,9 @@ CREATE POLICY "membership read"  ON memberships FOR SELECT TO authenticated
 CREATE POLICY "membership write" ON memberships FOR ALL TO authenticated
   USING (is_platform_admin()) WITH CHECK (is_platform_admin());
 
--- Business tables: one tenant-isolation policy each.
+-- Business tables: strict per-org isolation (NO platform-admin bypass —
+-- god mode lives only in the /platform console via SECURITY DEFINER fns,
+-- so admins never see other tenants' business data in the POS).
 DO $$
 DECLARE
   t    TEXT;
@@ -375,8 +377,8 @@ BEGIN
     EXECUTE format($f$
       CREATE POLICY "tenant isolation" ON %I
         FOR ALL TO authenticated
-        USING (org_id = auth_org() OR is_platform_admin())
-        WITH CHECK ((org_id = auth_org() AND current_org_active()) OR is_platform_admin())
+        USING (org_id = auth_org())
+        WITH CHECK (org_id = auth_org() AND current_org_active())
     $f$, t);
   END LOOP;
 END $$;
