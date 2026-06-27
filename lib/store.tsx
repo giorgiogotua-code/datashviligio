@@ -410,7 +410,9 @@ export const useStore = create<StoreState>()(
         // Tenant (organization) + platform-admin role for this user.
         const [orgRow, adminRow] = await Promise.all([
           supabase.from('memberships').select('org_id, organizations(id,name,plan,status,trial_ends_at,upgrade_requested)').maybeSingle(),
-          supabase.from('platform_admins').select('user_id').maybeSingle(),
+          // RPC returns a clean boolean — robust even with multiple admins
+          // (a direct table read + maybeSingle breaks once >1 admin exists).
+          supabase.rpc('is_platform_admin'),
         ])
         const orgData: any = (orgRow.data as any)?.organizations ?? null
         const currentOrg: CurrentOrg | null = orgData ? {
@@ -421,7 +423,7 @@ export const useStore = create<StoreState>()(
           trial_ends_at: orgData.trial_ends_at ?? null,
           upgrade_requested: !!orgData.upgrade_requested,
         } : null
-        const isPlatformAdmin = !!adminRow.data
+        const isPlatformAdmin = adminRow.data === true
 
         set({
           categories: (cats.data ?? []) as Category[],
